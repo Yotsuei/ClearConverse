@@ -1,0 +1,30 @@
+# Backend
+back/venv/
+back/__pycache__/
+back/*.pyc
+back/*.pyo
+back/*.pyd
+back/.Python
+back/pip-log.txt
+back/.env
+
+# Frontend
+front/node_modules/
+front/.env
+front/dist/
+front/build/
+front/.cache/
+front/coverage/
+front/.env.local
+front/.env.development.local
+front/.env.test.local
+front/.env.production.local
+front/npm-debug.log*
+front/yarn-debug.log*
+front/yarn-error.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
