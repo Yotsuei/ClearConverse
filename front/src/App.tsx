@@ -33,18 +33,25 @@ const App: React.FC = () => {
     formData.append('file', file);
 
     try {
+      console.log('Sending request to backend...');
       const response = await fetch('http://localhost:8000/process-audio', {
         method: 'POST',
         body: formData,
+        // Remove the headers - let the browser set them automatically for FormData
       });
 
+      console.log('Response status:', response.status);
+      
       if (!response.ok) {
-        throw new Error('Failed to process audio');
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to process audio');
       }
 
       const result = await response.json();
+      console.log('Response data:', result);
       setTranscription(result);
     } catch (err) {
+      console.error('Error:', err);
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
       setLoading(false);
