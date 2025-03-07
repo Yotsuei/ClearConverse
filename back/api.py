@@ -49,16 +49,23 @@ class AudioSegment:
 class Config:
     auth_token: str
     target_sample_rate: int = 16000
-    min_segment_duration: float = 0.5
-    overlap_threshold: float = 0.5
+    # Increase minimum segment duration to ensure segments are long enough for reliable embedding extraction.
+    min_segment_duration: float = 0.7  
+    # Slightly higher threshold to detect overlaps (adjust based on audio characteristics).
+    overlap_threshold: float = 0.5  
     condition_on_previous_text: bool = True
-    merge_gap_threshold: float = 0.5
-    min_overlap_duration_for_separation: float = 0.5
-    max_embedding_segments: int = 50
+    # Tighten gap threshold to avoid merging distinct speaker turns.
+    merge_gap_threshold: float = 0.4  
+    # Increase the minimum duration for overlap separation.
+    min_overlap_duration_for_separation: float = 0.7  
+    # Use more segments for a more robust speaker embedding average.
+    max_embedding_segments: int = 100  
     enhance_separated_audio: bool = True
     use_vad_refinement: bool = True
-    speaker_embedding_threshold: float = 0.60
-    noise_reduction_amount: float = 0.75
+    # Adjust the speaker embedding threshold if needed for more sensitive matching.
+    speaker_embedding_threshold: float = 0.65  
+    # Increase noise reduction to help cleaner input for diarization and embedding.
+    noise_reduction_amount: float = 0.85  
     transcription_batch_size: int = 8
     use_speaker_embeddings: bool = True
     temperature: float = 0.0
@@ -66,9 +73,12 @@ class Config:
     min_speakers: int = 1
     whisper_model_size: str = "small.en"
     transcribe_overlaps_individually: bool = True
-    sliding_window_size: float = 0.8
-    sliding_window_step: float = 0.4
-    secondary_diarization_threshold: float = 0.50
+    # Increase window size for overlap segmentation to capture more context.
+    sliding_window_size: float = 1.0  
+    # Use a finer step to get smoother segmentation in overlaps.
+    sliding_window_step: float = 0.5  
+    # Increase the secondary diarization threshold to catch more misclassifications.
+    secondary_diarization_threshold: float = 0.6
 
 def merge_diarization_segments(segments: List[Tuple[float, float, str]], gap_threshold: float) -> List[Tuple[float, float, str]]:
     if not segments:
