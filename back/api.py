@@ -55,15 +55,15 @@ class Config:
     overlap_threshold: float = 0.5  
     condition_on_previous_text: bool = True
     # Tighten gap threshold to avoid merging distinct speaker turns.
-    merge_gap_threshold: float = 0.4  
+    merge_gap_threshold: float = 0.75  
     # Increase the minimum duration for overlap separation.
-    min_overlap_duration_for_separation: float = 0.7  
+    min_overlap_duration_for_separation: float = 0.5  
     # Use more segments for a more robust speaker embedding average.
     max_embedding_segments: int = 100  
     enhance_separated_audio: bool = True
     use_vad_refinement: bool = True
     # Adjust the speaker embedding threshold if needed for more sensitive matching.
-    speaker_embedding_threshold: float = 0.75  
+    speaker_embedding_threshold: float = 0.50  
     # Increase noise reduction to help cleaner input for diarization and embedding.
     noise_reduction_amount: float = 0.85  
     transcription_batch_size: int = 8
@@ -78,7 +78,7 @@ class Config:
     # Use a finer step to get smoother segmentation in overlaps.
     sliding_window_step: float = 0.5  
     # Increase the secondary diarization threshold to catch more misclassifications.
-    secondary_diarization_threshold: float = 0.6
+    secondary_diarization_threshold: float = 0.40
 
 def merge_diarization_segments(segments: List[Tuple[float, float, str]], gap_threshold: float) -> List[Tuple[float, float, str]]:
     if not segments:
@@ -196,11 +196,28 @@ class EnhancedAudioProcessor:
 
     def _extract_segment(self, audio: torch.Tensor, start: float, end: float, sample_rate: Optional[int] = None) -> torch.Tensor:
         sr = sample_rate or self.config.target_sample_rate
-        start_idx = max(0, int(start * sr))
-        end_idx = min(audio.shape[-1], int(end * sr))
+        # Log the raw times for debugging
+        audio_duration = audio.shape[-1] / sr
+        logging.debug(f"Extracting segment: start={start:.2f}s, end={end:.2f}s, audio duration={audio_duration:.2f}s")
+        
+        # Ensure start and end are within audio duration bounds
+        if start < 0:
+            logging.warning(f"Start time {start:.2f}s is negative; setting to 0.")
+            start = 0.0
+        if end > audio_duration:
+            logging.warning(f"End time {end:.2f}s exceeds audio duration ({audio_duration:.2f}s); clipping to audio duration.")
+            end = audio_duration
+
+        start_idx = int(start * sr)
+        end_idx = int(end * sr)
+        
+        # Additional check: if indices are invalid, log detailed info and return a small non-empty tensor
         if start_idx >= end_idx:
-            logging.warning(f"Invalid segment indices: {start_idx}-{end_idx} for audio length {audio.shape[-1]}")
+            logging.warning(f"Invalid segment indices: {start_idx}-{end_idx} for audio length {audio.shape[-1]} "
+                            f"(start_time={start:.2f}s, end_time={end:.2f}s, sample_rate={sr}).")
+            # Return a small tensor of zeros (or consider skipping the segment)
             return torch.zeros((1, 100), device=self.device)
+        
         return audio[:, start_idx:end_idx]
 
     def _extract_embedding(self, audio_segment: torch.Tensor) -> Optional[torch.Tensor]:
@@ -330,7 +347,7 @@ class EnhancedAudioProcessor:
             torchaudio.save(temp_path, audio_segment.cpu(), self.config.target_sample_rate)
             diarization_result = self.diarization(
                 temp_path,
-                min_speakers=2,
+                min_speakers=1,
                 max_speakers=2
             )
             os.remove(temp_path)
