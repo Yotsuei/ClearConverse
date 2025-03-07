@@ -43,3 +43,4 @@ uvicorn
 noisereduce 
 pyannote.audio 
 openai-whisper
+dotenv
