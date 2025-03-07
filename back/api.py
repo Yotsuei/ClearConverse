@@ -588,34 +588,31 @@ processor = EnhancedAudioProcessor(config)
 
 @app.post("/transcribe", summary="Upload an audio file and get the transcript")
 async def transcribe_audio(file: UploadFile = File(...)):
-    # Validate file type
     if not file.filename.endswith((".mp3", ".wav")):
         raise HTTPException(status_code=400, detail="Invalid file type. Only MP3 and WAV files are accepted.")
     try:
-        # Save uploaded file to a temporary location
         temp_dir = Path("temp_uploads")
         temp_dir.mkdir(exist_ok=True)
         temp_file_path = temp_dir / file.filename
         with open(temp_file_path, "wb") as f:
             content = await file.read()
             f.write(content)
-        # Process the file using the processor
         audio_path, transcript, transcript_file_path = processor.run(str(temp_file_path), debug_mode=False)
-        # Remove the temporary upload file
         os.remove(temp_file_path)
-        # Create a download URL (assuming the server is running locally on port 8000)
-        download_url = f"/download/{Path(transcript_file_path).name}"
+        # Compute relative path from OUTPUT_DIR so that the nested folder is preserved
+        rel_path = Path(transcript_file_path).relative_to(Path(OUTPUT_DIR))
+        download_url = f"/download/{rel_path}"
         return JSONResponse(content={"audio_file": audio_path, "transcript": transcript, "download_url": download_url})
     except Exception as e:
         logging.error(f"Error in /transcribe endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/download/{filename}", summary="Download the transcript TXT file")
-async def download_transcript(filename: str):
-    transcript_path = Path(OUTPUT_DIR) / filename
+@app.get("/download/{file_path:path}", summary="Download the transcript TXT file")
+async def download_transcript(file_path: str):
+    transcript_path = Path(OUTPUT_DIR) / file_path
     if not transcript_path.exists():
         raise HTTPException(status_code=404, detail="Transcript file not found.")
-    return FileResponse(path=str(transcript_path), media_type="text/plain", filename=filename)
+    return FileResponse(path=str(transcript_path), media_type="text/plain", filename=transcript_path.name)
 
 # =============================================================================
 # Main entry point
