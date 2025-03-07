@@ -7,6 +7,11 @@ back/*.pyd
 back/.Python
 back/pip-log.txt
 back/.env
+back/models/
+back/processed_audio
+back/temp_uploads
+back/tmpdir_resepformer
+back/*.env
 
 # Frontend
 front/node_modules/
