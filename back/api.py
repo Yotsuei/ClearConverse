@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 import uvicorn
+from dotenv import load_dotenv
 
 # Import necessary libraries for audio processing
 import torch
@@ -579,8 +580,9 @@ app.add_middleware(
 OUTPUT_DIR = "processed_audio"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Initialize the EnhancedAudioProcessor on startup
-AUTH_TOKEN = "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"  # Replace with your actual token
+
+load_dotenv()  # this loads variables from .env into the environment
+AUTH_TOKEN = os.getenv("HF_AUTH_TOKEN")
 config = Config(auth_token=AUTH_TOKEN)
 processor = EnhancedAudioProcessor(config)
 

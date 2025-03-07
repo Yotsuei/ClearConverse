@@ -11,6 +11,7 @@ back/models/
 back/processed_audio
 back/temp_uploads
 back/tmpdir_resepformer
+back/*.env
 
 # Frontend
 front/node_modules/
