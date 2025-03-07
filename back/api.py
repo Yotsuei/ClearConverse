@@ -63,7 +63,7 @@ class Config:
     enhance_separated_audio: bool = True
     use_vad_refinement: bool = True
     # Adjust the speaker embedding threshold if needed for more sensitive matching.
-    speaker_embedding_threshold: float = 0.65  
+    speaker_embedding_threshold: float = 0.75  
     # Increase noise reduction to help cleaner input for diarization and embedding.
     noise_reduction_amount: float = 0.85  
     transcription_batch_size: int = 8
