@@ -1,34 +1,40 @@
 // components/FileUpload.tsx
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 
 interface FileUploadProps {
-  onUploadResponse: (transcript: string, downloadUrl: string, audioBlob: Blob) => void;
-  setLoading: (loading: boolean) => void;
-  updateProgress: (progress: number) => void;
+  onFileSelected: (file: File) => void;
+  onUploadResponse: (transcript: string, downloadUrl: string) => void;
+  setIsUploading: (isUploading: boolean) => void;
+  setUploadProgress: (progress: number) => void;
+  setIsProcessing: (isProcessing: boolean) => void;
+  startProcessing: () => void;
 }
 
 const FileUpload: React.FC<FileUploadProps> = ({ 
+  onFileSelected, 
   onUploadResponse, 
-  setLoading, 
-  updateProgress 
+  setIsUploading, 
+  setUploadProgress,
+  setIsProcessing,
+  startProcessing
 }) => {
   const [file, setFile] = useState<File | null>(null);
-  const [dragActive, setDragActive] = useState<boolean>(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [dragActive, setDragActive] = useState(false);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files && event.target.files.length > 0) {
-      setFile(event.target.files[0]);
+      const selectedFile = event.target.files[0];
+      setFile(selectedFile);
+      onFileSelected(selectedFile);
     }
   };
 
   const handleDrag = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    
-    if (e.type === 'dragenter' || e.type === 'dragover') {
+    if (e.type === "dragenter" || e.type === "dragover") {
       setDragActive(true);
-    } else if (e.type === 'dragleave') {
+    } else if (e.type === "dragleave") {
       setDragActive(false);
     }
   };
@@ -39,167 +45,114 @@ const FileUpload: React.FC<FileUploadProps> = ({
     setDragActive(false);
     
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      setFile(e.dataTransfer.files[0]);
+      const droppedFile = e.dataTransfer.files[0];
+      setFile(droppedFile);
+      onFileSelected(droppedFile);
     }
   };
 
   const handleUpload = async () => {
     if (!file) {
-      alert('Please select an audio file first.');
+      alert('Please select a file first.');
       return;
     }
 
-    setLoading(true);
-    updateProgress(0);
-    
+    setIsUploading(true);
+    setUploadProgress(0);
     const formData = new FormData();
     formData.append('file', file);
 
     try {
-      // Create a new XMLHttpRequest to track upload progress
+      // Implement XMLHttpRequest for progress tracking
       const xhr = new XMLHttpRequest();
+      xhr.open('POST', 'http://localhost:8000/transcribe');
       
       xhr.upload.addEventListener('progress', (event) => {
         if (event.lengthComputable) {
-          const percentComplete = Math.round((event.loaded / event.total) * 50);
-          updateProgress(percentComplete); // Only go up to 50% on upload, the other 50% is for processing
+          const progress = Math.round((event.loaded / event.total) * 100);
+          setUploadProgress(progress);
         }
       });
 
-      xhr.addEventListener('load', async () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          const data = JSON.parse(xhr.responseText);
-          // Simulate processing progress (from 50% to 100%)
-          let progress = 50;
-          const progressInterval = setInterval(() => {
-            progress += 2;
-            updateProgress(Math.min(progress, 99));
-            if (progress >= 100) clearInterval(progressInterval);
-          }, 200);
+      xhr.onload = function() {
+        if (xhr.status === 200) {
+          setIsUploading(false);
+          startProcessing();
           
-          // Convert the audio file to a blob for playback
-          const audioBlob = file;
-          
-          setTimeout(() => {
-            updateProgress(100);
-            onUploadResponse(data.transcript, data.download_url, audioBlob);
-            clearInterval(progressInterval);
-          }, 2000);
+          // Parse response
+          const response = JSON.parse(xhr.responseText);
+          onUploadResponse(response.transcript, response.download_url);
         } else {
           throw new Error(`Error: ${xhr.statusText}`);
         }
-      });
+      };
 
-      xhr.addEventListener('error', () => {
+      xhr.onerror = function() {
         throw new Error('Network error occurred');
-      });
+      };
 
-      xhr.open('POST', 'http://localhost:8000/transcribe');
       xhr.send(formData);
     } catch (error) {
       console.error('Upload failed:', error);
       alert('There was an error uploading your file.');
-      setLoading(false);
-      updateProgress(0);
+      setIsUploading(false);
     }
   };
 
   return (
-    <div 
-      className={`bg-slate-800/50 border ${dragActive ? 'border-blue-400 bg-slate-800/80' : 'border-slate-600'} rounded-xl p-6 mb-6 transition-all duration-300`}
-      onDragEnter={handleDrag}
-      onDragLeave={handleDrag}
-      onDragOver={handleDrag}
-      onDrop={handleDrop}
-    >
+    <div className="flex flex-col items-center">
       <div 
-        className="border-2 border-dashed border-slate-600 rounded-lg p-8 text-center cursor-pointer hover:border-blue-400 transition-colors duration-300"
-        onClick={() => fileInputRef.current?.click()}
+        className={`w-full border-2 border-dashed rounded-lg p-6 mb-4 cursor-pointer text-center transition-colors
+          ${dragActive ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-blue-400'}`}
+        onDragEnter={handleDrag}
+        onDragLeave={handleDrag}
+        onDragOver={handleDrag}
+        onDrop={handleDrop}
+        onClick={() => document.getElementById('fileInput')?.click()}
       >
         <input
+          id="fileInput"
           type="file"
-          ref={fileInputRef}
-          accept=".mp3,.wav"
+          accept=".mp3,.wav,.m4a,.ogg"
           onChange={handleFileChange}
           className="hidden"
         />
         
-        <div className="flex flex-col items-center justify-center">
-          <svg 
-            className="w-12 h-12 text-slate-400 mb-3" 
-            fill="none" 
-            stroke="currentColor" 
-            viewBox="0 0 24 24" 
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            <path 
-              strokeLinecap="round" 
-              strokeLinejoin="round" 
-              strokeWidth={1.5} 
-              d="M9 19V13.5M12 15V10.5M15 17V14.5M5 21H19C20.1046 21 21 20.1046 21 19V5C21 3.89543 20.1046 3 19 3H5C3.89543 3 3 3.89543 3 5V19C3 20.1046 3.89543 21 5 21Z" 
-            />
+        <div className="flex flex-col items-center justify-center py-5">
+          <svg className="w-10 h-10 mb-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
           </svg>
-          <p className="mb-2 text-sm text-slate-400">
+          <p className="mb-2 text-sm text-gray-500">
             <span className="font-semibold">Click to upload</span> or drag and drop
           </p>
-          <p className="text-xs text-slate-500">MP3 or WAV (Max 10MB)</p>
+          <p className="text-xs text-gray-500">MP3, WAV, M4A or OGG (MAX. 20MB)</p>
         </div>
       </div>
       
       {file && (
-        <div className="mt-4 bg-slate-700/50 rounded-lg p-3 flex items-center justify-between">
-          <div className="flex items-center">
-            <svg 
-              className="w-8 h-8 text-blue-400 mr-3" 
-              fill="none" 
-              stroke="currentColor" 
-              viewBox="0 0 24 24" 
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path 
-                strokeLinecap="round" 
-                strokeLinejoin="round" 
-                strokeWidth={1.5} 
-                d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" 
-              />
+        <div className="w-full bg-gray-100 rounded-lg p-3 mb-4 flex items-center">
+          <div className="bg-blue-100 rounded-lg p-2 mr-3">
+            <svg className="w-6 h-6 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path>
             </svg>
-            <div className="overflow-hidden">
-              <p className="text-sm font-medium text-white truncate">{file.name}</p>
-              <p className="text-xs text-slate-400">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
-            </div>
           </div>
-          <button 
-            onClick={() => setFile(null)}
-            className="ml-4 p-1 rounded-full hover:bg-slate-600 text-slate-400 hover:text-white transition-colors"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          <div className="flex-grow truncate">
+            <p className="text-sm font-medium truncate">{file.name}</p>
+            <p className="text-xs text-gray-500">{(file.size / (1024 * 1024)).toFixed(2)} MB</p>
+          </div>
         </div>
       )}
       
       <button
         onClick={handleUpload}
         disabled={!file}
-        className={`w-full mt-4 py-3 px-5 text-white font-medium rounded-lg transition-all duration-300 flex items-center justify-center
-          ${file ? 'bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 shadow-lg' : 'bg-slate-700 cursor-not-allowed'}`}
+        className={`w-full py-3 px-5 text-white font-bold rounded-lg transition-all duration-300 
+          ${!file 
+            ? 'bg-gray-400 cursor-not-allowed' 
+            : 'bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg'}`
+        }
       >
-        <svg 
-          className="w-5 h-5 mr-2" 
-          fill="none" 
-          stroke="currentColor" 
-          viewBox="0 0 24 24" 
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <path 
-            strokeLinecap="round" 
-            strokeLinejoin="round" 
-            strokeWidth={2} 
-            d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" 
-          />
-        </svg>
-        Process Audio
+        Transcribe Audio
       </button>
     </div>
   );
