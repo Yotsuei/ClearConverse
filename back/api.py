@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 import os
 import json
 import shutil
@@ -28,6 +27,7 @@ from speechbrain.inference import SepformerSeparation
 # =============================================================================
 # Logging setup
 # =============================================================================
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 # =============================================================================
@@ -49,23 +49,16 @@ class AudioSegment:
 class Config:
     auth_token: str
     target_sample_rate: int = 16000
-    # Increase minimum segment duration to ensure segments are long enough for reliable embedding extraction.
-    min_segment_duration: float = 0.5  
-    # Slightly higher threshold to detect overlaps (adjust based on audio characteristics).
-    overlap_threshold: float = 0.5  
+    min_segment_duration: float = 0.5
+    overlap_threshold: float = 0.5
     condition_on_previous_text: bool = True
-    # Tighten gap threshold to avoid merging distinct speaker turns.
-    merge_gap_threshold: float = 0.75  
-    # Increase the minimum duration for overlap separation.
-    min_overlap_duration_for_separation: float = 0.5  
-    # Use more segments for a more robust speaker embedding average.
-    max_embedding_segments: int = 100  
+    merge_gap_threshold: float = 0.5
+    min_overlap_duration_for_separation: float = 0.5
+    max_embedding_segments: int = 50
     enhance_separated_audio: bool = True
     use_vad_refinement: bool = True
-    # Adjust the speaker embedding threshold if needed for more sensitive matching.
-    speaker_embedding_threshold: float = 0.50  
-    # Increase noise reduction to help cleaner input for diarization and embedding.
-    noise_reduction_amount: float = 0.85  
+    speaker_embedding_threshold: float = 0.60
+    noise_reduction_amount: float = 0.75
     transcription_batch_size: int = 8
     use_speaker_embeddings: bool = True
     temperature: float = 0.0
@@ -73,12 +66,9 @@ class Config:
     min_speakers: int = 1
     whisper_model_size: str = "small.en"
     transcribe_overlaps_individually: bool = True
-    # Increase window size for overlap segmentation to capture more context.
-    sliding_window_size: float = 1.0  
-    # Use a finer step to get smoother segmentation in overlaps.
-    sliding_window_step: float = 0.5  
-    # Increase the secondary diarization threshold to catch more misclassifications.
-    secondary_diarization_threshold: float = 0.40
+    sliding_window_size: float = 0.8
+    sliding_window_step: float = 0.4
+    secondary_diarization_threshold: float = 0.50
 
 def merge_diarization_segments(segments: List[Tuple[float, float, str]], gap_threshold: float) -> List[Tuple[float, float, str]]:
     if not segments:
@@ -153,12 +143,29 @@ class EnhancedAudioProcessor:
 
     def _initialize_models(self):
         logging.info(f"Initializing models on {self.device}...")
-        self.separator = SepformerSeparation.from_hparams(
-            source="speechbrain/resepformer-wsj02mix",
-            savedir="tmpdir_resepformer",
-            run_opts={"device": self.device}
-        )
-        self.whisper_model = whisper.load_model(self.config.whisper_model_size).to(self.device)
+        # --- RESepFormer Model Loading with Caching ---
+        custom_model_path = os.path.join("models", "RESepFormer-Tuned-V1.2")
+        cache_dir = os.path.join("models", "cached_models")
+        resepformer_cache_path = os.path.join(cache_dir, "resepformer_cached.pt")
+        os.makedirs(cache_dir, exist_ok=True)
+        if os.path.exists(resepformer_cache_path):
+            logging.info(f"Loading RESepFormer model from cache: {resepformer_cache_path}")
+            try:
+                self.separator = torch.load(resepformer_cache_path)
+                logging.info("RESepFormer model loaded from cache successfully!")
+            except Exception as e:
+                logging.warning(f"Failed to load model from cache: {str(e)}. Falling back to original model.")
+                self._load_resepformer_from_source(custom_model_path)
+                self._cache_resepformer_model(resepformer_cache_path)
+        else:
+            logging.info("No cached RESepFormer model found. Loading from source...")
+            self._load_resepformer_from_source(custom_model_path)
+            self._cache_resepformer_model(resepformer_cache_path)
+
+        # --- Fine-tuned Whisper Model Loading from local folder ---
+        self._load_whisper_model()
+
+        # --- Load diarization, VAD and embedding models ---
         self.diarization = Pipeline.from_pretrained(
             "pyannote/speaker-diarization-3.1",
             use_auth_token=self.config.auth_token
@@ -171,6 +178,95 @@ class EnhancedAudioProcessor:
             "pyannote/embedding", window="whole", use_auth_token=self.config.auth_token
         ).to(self.device)
         logging.info("Models initialized successfully!")
+
+    def _load_resepformer_from_source(self, model_path):
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"RESepFormer model path not found: {model_path}")
+        logging.info(f"Loading fine-tuned RESepFormer model from: {model_path}")
+        try:
+            self.separator = SepformerSeparation.from_hparams(
+                source=model_path,
+                savedir="models/tmpdir_custom_resepformer",
+                run_opts={"device": self.device}
+            )
+            logging.info("Fine-tuned RESepFormer model loaded successfully!")
+        except Exception as e:
+            raise RuntimeError(f"Failed to load fine-tuned RESepFormer model: {str(e)}\n{traceback.format_exc()}")
+
+    def _cache_resepformer_model(self, cache_path):
+        logging.info(f"Caching RESepFormer model to: {cache_path}")
+        try:
+            torch.save(self.separator, cache_path)
+            logging.info("RESepFormer model cached successfully!")
+        except Exception as e:
+            logging.warning(f"Failed to cache RESepFormer model: {str(e)}")
+
+    def _load_whisper_model(self):
+        logging.info("Loading fine-tuned Whisper model from local path...")
+        local_model_path = os.path.join("models", "Whisper-Tuned-V1.3")
+        if not os.path.exists(local_model_path):
+            raise FileNotFoundError(f"Model path not found: {local_model_path}")
+        logging.info(f"Files in model directory: {os.listdir(local_model_path)}")
+        model_pt_path = os.path.join(local_model_path, "model.pt")
+        model_safetensors_path = os.path.join(local_model_path, "model.safetensors")
+        if os.path.exists(model_pt_path):
+            self._load_whisper_from_pt(model_pt_path)
+        elif os.path.exists(model_safetensors_path):
+            self._load_whisper_from_safetensors(model_safetensors_path)
+        else:
+            available_files = os.listdir(local_model_path)
+            raise FileNotFoundError(
+                f"No model files (model.pt or model.safetensors) found at {local_model_path}. "
+                f"Available files: {available_files}"
+            )
+        self.whisper_model = self.whisper_model.to(self.device)
+        logging.info("Whisper model loaded successfully!")
+
+    def _load_whisper_from_pt(self, model_pt_path):
+        logging.info(f"Found model.pt at {model_pt_path}")
+        logging.info(f"Loading base model: {self.config.whisper_model_size}")
+        base_model = whisper.load_model(self.config.whisper_model_size)
+        logging.info("Loading fine-tuned weights from model.pt")
+        try:
+            checkpoint = torch.load(model_pt_path, map_location=self.device)
+            base_model_keys = set(base_model.state_dict().keys())
+            checkpoint_keys = set(checkpoint.keys() if isinstance(checkpoint, dict) else checkpoint.state_dict().keys())
+            logging.info(f"Base model has {len(base_model_keys)} keys")
+            logging.info(f"Checkpoint has {len(checkpoint_keys)} keys")
+            missing_keys = base_model_keys - checkpoint_keys
+            extra_keys = checkpoint_keys - base_model_keys
+            if missing_keys:
+                logging.warning(f"Missing keys in checkpoint: {missing_keys}")
+            if extra_keys:
+                logging.warning(f"Extra keys in checkpoint: {extra_keys}")
+            base_model.load_state_dict(checkpoint if isinstance(checkpoint, dict) else checkpoint.state_dict(),
+                                       strict=False)
+            self.whisper_model = base_model
+        except Exception as e:
+            raise RuntimeError(f"Failed to load model.pt: {str(e)}\n{traceback.format_exc()}")
+
+    def _load_whisper_from_safetensors(self, model_safetensors_path):
+        logging.info(f"Found model.safetensors at {model_safetensors_path}")
+        logging.info(f"Loading base model: {self.config.whisper_model_size}")
+        base_model = whisper.load_model(self.config.whisper_model_size)
+        try:
+            from safetensors.torch import load_file
+            logging.info("Loading fine-tuned weights from model.safetensors")
+            state_dict = load_file(model_safetensors_path)
+            base_model_keys = set(base_model.state_dict().keys())
+            state_dict_keys = set(state_dict.keys())
+            logging.info(f"Base model has {len(base_model_keys)} keys")
+            logging.info(f"SafeTensors has {len(state_dict_keys)} keys")
+            missing_keys = base_model_keys - state_dict_keys
+            extra_keys = state_dict_keys - base_model_keys
+            if missing_keys:
+                logging.warning(f"Missing keys in safetensors: {missing_keys}")
+            if extra_keys:
+                logging.warning(f"Extra keys in safetensors: {extra_keys}")
+            base_model.load_state_dict(state_dict, strict=False)
+            self.whisper_model = base_model
+        except Exception as e:
+            raise RuntimeError(f"Failed to load model.safetensors: {str(e)}\n{traceback.format_exc()}")
 
     def load_audio(self, file_path: str) -> Tuple[torch.Tensor, int]:
         logging.info(f"Loading audio from {file_path}")
@@ -594,7 +690,6 @@ app = FastAPI(
     description="API to process audio files (MP3/WAV) and return a formatted transcript. The transcript can also be downloaded as a TXT file."
 )
 
-# Allow CORS if needed
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -626,7 +721,6 @@ async def transcribe_audio(file: UploadFile = File(...)):
             f.write(content)
         audio_path, transcript, transcript_file_path = processor.run(str(temp_file_path), debug_mode=False)
         os.remove(temp_file_path)
-        # Compute relative path from OUTPUT_DIR so that the nested folder is preserved
         rel_path = Path(transcript_file_path).relative_to(Path(OUTPUT_DIR))
         download_url = f"/download/{rel_path}"
         return JSONResponse(content={"audio_file": audio_path, "transcript": transcript, "download_url": download_url})
