@@ -50,7 +50,7 @@ class Config:
     auth_token: str
     target_sample_rate: int = 16000
     # Increase minimum segment duration to ensure segments are long enough for reliable embedding extraction.
-    min_segment_duration: float = 0.5  
+    min_segment_duration: float = 0.2  
     # Slightly higher threshold to detect overlaps (adjust based on audio characteristics).
     overlap_threshold: float = 0.5  
     condition_on_previous_text: bool = True
