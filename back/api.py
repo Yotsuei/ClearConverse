@@ -57,7 +57,7 @@ class Config:
     # Tighten gap threshold to avoid merging distinct speaker turns.
     merge_gap_threshold: float = 0.75  
     # Increase the minimum duration for overlap separation.
-    min_overlap_duration_for_separation: float = 0.5  
+    min_overlap_duration_for_separation: float = 0.4  
     # Use more segments for a more robust speaker embedding average.
     max_embedding_segments: int = 100  
     enhance_separated_audio: bool = True
@@ -74,9 +74,9 @@ class Config:
     whisper_model_size: str = "small.en"
     transcribe_overlaps_individually: bool = True
     # Increase window size for overlap segmentation to capture more context.
-    sliding_window_size: float = 1.0  
+    sliding_window_size: float = 0.8  
     # Use a finer step to get smoother segmentation in overlaps.
-    sliding_window_step: float = 0.5  
+    sliding_window_step: float = 0.4  
     # Increase the secondary diarization threshold to catch more misclassifications.
     secondary_diarization_threshold: float = 0.40
 
