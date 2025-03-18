@@ -3,9 +3,10 @@ import React, { useState, useRef, useEffect } from 'react';
 
 interface AudioRecorderProps {
   onRecordingComplete: (blob: Blob) => void;
+  onTranscribe?: () => void;
 }
 
-const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete }) => {
+const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTranscribe }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [recordingBlob, setRecordingBlob] = useState<Blob | null>(null);
@@ -212,9 +213,18 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete }) =>
           </div>
           
           {recordingBlob && !isRecording && (
-            <div className="mt-6 text-center">
+            <div className="mt-6 text-center w-full">
               <p className="text-green-600 font-medium mb-2">Recording complete!</p>
-              <p className="text-sm text-gray-500">You can now transcribe this recording</p>
+              
+              {/* Added transcribe button after recording is complete */}
+              {onTranscribe && (
+                <button
+                  onClick={onTranscribe}
+                  className="w-full py-3 px-5 mt-2 text-white font-bold rounded-lg transition-all duration-300 bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg"
+                >
+                  Transcribe Recording
+                </button>
+              )}
             </div>
           )}
         </>
