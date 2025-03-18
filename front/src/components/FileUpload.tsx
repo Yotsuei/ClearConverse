@@ -8,6 +8,7 @@ interface FileUploadProps {
   setUploadProgress: (progress: number) => void;
   setIsProcessing: (isProcessing: boolean) => void;
   startProcessing: () => void;
+  clearTranscription: () => void;
 }
 
 const FileUpload: React.FC<FileUploadProps> = ({ 
@@ -16,13 +17,18 @@ const FileUpload: React.FC<FileUploadProps> = ({
   setIsUploading, 
   setUploadProgress,
   setIsProcessing,
-  startProcessing
+  startProcessing,
+  clearTranscription
 }) => {
   const [file, setFile] = useState<File | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [uploadXhr, setUploadXhr] = useState<XMLHttpRequest | null>(null);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files && event.target.files.length > 0) {
+      // Clear any previous transcription when selecting a new file
+      clearTranscription();
+      
       const selectedFile = event.target.files[0];
       setFile(selectedFile);
       onFileSelected(selectedFile);
@@ -45,10 +51,24 @@ const FileUpload: React.FC<FileUploadProps> = ({
     setDragActive(false);
     
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      // Clear any previous transcription when dropping a new file
+      clearTranscription();
+      
       const droppedFile = e.dataTransfer.files[0];
       setFile(droppedFile);
       onFileSelected(droppedFile);
     }
+  };
+
+  const handleCancelUpload = () => {
+    if (uploadXhr) {
+      uploadXhr.abort(); // Abort the XHR request
+      setUploadXhr(null);
+    }
+    
+    // Reset uploading state
+    setIsUploading(false);
+    setUploadProgress(0);
   };
 
   const handleUpload = async () => {
@@ -57,6 +77,9 @@ const FileUpload: React.FC<FileUploadProps> = ({
       return;
     }
 
+    // Clear any previous transcription when uploading
+    clearTranscription();
+    
     setIsUploading(true);
     setUploadProgress(0);
     const formData = new FormData();
@@ -65,6 +88,8 @@ const FileUpload: React.FC<FileUploadProps> = ({
     try {
       // Implement XMLHttpRequest for progress tracking
       const xhr = new XMLHttpRequest();
+      setUploadXhr(xhr); // Store XHR reference for cancel functionality
+      
       xhr.open('POST', 'http://localhost:8000/transcribe');
       
       xhr.upload.addEventListener('progress', (event) => {
@@ -77,6 +102,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
       xhr.onload = function() {
         if (xhr.status === 200) {
           setIsUploading(false);
+          setUploadXhr(null);
           startProcessing();
           
           // Parse response
@@ -88,7 +114,12 @@ const FileUpload: React.FC<FileUploadProps> = ({
       };
 
       xhr.onerror = function() {
+        setUploadXhr(null);
         throw new Error('Network error occurred');
+      };
+
+      xhr.onabort = function() {
+        console.log('Upload aborted');
       };
 
       xhr.send(formData);
@@ -96,6 +127,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
       console.error('Upload failed:', error);
       alert('There was an error uploading your file.');
       setIsUploading(false);
+      setUploadXhr(null);
     }
   };
 
@@ -140,20 +172,41 @@ const FileUpload: React.FC<FileUploadProps> = ({
             <p className="text-sm font-medium truncate">{file.name}</p>
             <p className="text-xs text-gray-500">{(file.size / (1024 * 1024)).toFixed(2)} MB</p>
           </div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setFile(null);
+            }}
+            className="ml-2 text-gray-400 hover:text-red-500"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+          </button>
         </div>
       )}
       
-      <button
-        onClick={handleUpload}
-        disabled={!file}
-        className={`w-full py-3 px-5 text-white font-bold rounded-lg transition-all duration-300 
-          ${!file 
-            ? 'bg-gray-400 cursor-not-allowed' 
-            : 'bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg'}`
-        }
-      >
-        Transcribe Audio
-      </button>
+      {!uploadXhr ? (
+        <button
+          onClick={handleUpload}
+          disabled={!file}
+          className={`w-full py-3 px-5 text-white font-bold rounded-lg transition-all duration-300 
+            ${!file 
+              ? 'bg-gray-400 cursor-not-allowed' 
+              : 'bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg'}`
+          }
+        >
+          Transcribe Audio
+        </button>
+      ) : (
+        <button
+          onClick={handleCancelUpload}
+          className="w-full py-3 px-5 text-white font-bold rounded-lg transition-all duration-300 
+            bg-red-600 hover:bg-red-700 active:scale-98 shadow-lg"
+        >
+          Cancel Upload
+        </button>
+      )}
     </div>
   );
 };

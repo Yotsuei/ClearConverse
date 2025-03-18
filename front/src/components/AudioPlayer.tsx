@@ -3,9 +3,10 @@ import React, { useRef, useState, useEffect } from 'react';
 
 interface AudioPlayerProps {
   audioUrl: string;
+  onTranscribe?: () => void;
 }
 
-const AudioPlayer: React.FC<AudioPlayerProps> = ({ audioUrl }) => {
+const AudioPlayer: React.FC<AudioPlayerProps> = ({ audioUrl, onTranscribe }) => {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
@@ -87,6 +88,12 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ audioUrl }) => {
         className="hidden"
       />
       
+      {/* Time display above progress bar */}
+      <div className="flex justify-between text-xs text-gray-500 mb-1">
+        <span>{formatTime(currentTime)}</span>
+        <span>{formatTime(duration)}</span>
+      </div>
+      
       {/* Progress bar */}
       <div 
         ref={progressBarRef}
@@ -99,14 +106,8 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ audioUrl }) => {
         ></div>
       </div>
       
-      {/* Time display */}
-      <div className="flex justify-between text-xs text-gray-500 mb-3">
-        <span>{formatTime(currentTime)}</span>
-        <span>{formatTime(duration)}</span>
-      </div>
-      
       {/* Controls */}
-      <div className="flex justify-center items-center gap-6">
+      <div className="flex justify-center items-center gap-6 mb-4">
         <button 
           onClick={handleSkipBackward}
           className="w-10 h-10 flex items-center justify-center text-gray-600 hover:text-blue-600 transition-colors"
@@ -144,6 +145,16 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ audioUrl }) => {
           <span className="sr-only">Forward 10s</span>
         </button>
       </div>
+      
+      {/* Transcribe button at the bottom */}
+      {onTranscribe && (
+        <button
+          onClick={onTranscribe}
+          className="w-full py-3 px-5 text-white font-bold rounded-lg transition-all duration-300 bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg"
+        >
+          Transcribe Audio
+        </button>
+      )}
     </div>
   );
 };
