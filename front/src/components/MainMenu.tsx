@@ -2,7 +2,7 @@
 import React from 'react';
 
 interface MainMenuProps {
-  onSelectModule: (module: 'upload' | 'record') => void;
+  onSelectModule: (module: 'upload' | 'record' | 'url') => void;
 }
 
 const MainMenu: React.FC<MainMenuProps> = ({ onSelectModule }) => {
@@ -17,7 +17,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ onSelectModule }) => {
         </p>
       </div>
 
-      <div className="grid md:grid-cols-2 gap-8 mt-12">
+      <div className="grid md:grid-cols-3 gap-8 mt-12">
         {/* Upload Audio Card */}
         <div 
           onClick={() => onSelectModule('upload')}
@@ -29,7 +29,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ onSelectModule }) => {
             </svg>
           </div>
           <div className="p-6">
-            <h3 className="text-2xl font-bold text-gray-800 mb-2">Upload Audio</h3>
+            <h3 className="text-2xl font-bold text-gray-800 mb-2">Upload File</h3>
             <p className="text-gray-600 mb-4">
               Upload your audio files for transcription. Supports MP3, WAV, M4A, and OGG formats.
             </p>
@@ -41,6 +41,33 @@ const MainMenu: React.FC<MainMenuProps> = ({ onSelectModule }) => {
             </div>
             <button className="mt-5 w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-colors">
               Choose File
+            </button>
+          </div>
+        </div>
+
+        {/* Google Drive URL Card */}
+        <div 
+          onClick={() => onSelectModule('url')}
+          className="bg-white rounded-xl overflow-hidden shadow-lg border border-gray-200 transition-all duration-300 hover:shadow-xl hover:translate-y-[-8px] cursor-pointer"
+        >
+          <div className="h-48 bg-gradient-to-r from-green-500 to-green-600 flex items-center justify-center">
+            <svg className="w-24 h-24 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path>
+            </svg>
+          </div>
+          <div className="p-6">
+            <h3 className="text-2xl font-bold text-gray-800 mb-2">Google Drive</h3>
+            <p className="text-gray-600 mb-4">
+              Transcribe audio directly from Google Drive using a shareable URL. No download needed.
+            </p>
+            <div className="flex items-center text-sm text-gray-500">
+              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path>
+              </svg>
+              Must be publicly accessible
+            </div>
+            <button className="mt-5 w-full py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg transition-colors">
+              Paste Drive URL
             </button>
           </div>
         </div>
