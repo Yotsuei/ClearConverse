@@ -6,13 +6,15 @@ import AudioPlayer from './components/AudioPlayer';
 import TranscriptionDisplay from './components/TranscriptionDisplay';
 import { Tab } from './components/Tab';
 import MainMenu from './components/MainMenu';
+import UrlUpload from './components/UrlUpload';
+import ProgressBar from './components/ProgressBar';
 
 type AudioSource = {
   file: File | null;
   url: string | null;
 };
 
-type Module = 'upload' | 'record';
+type Module = 'upload' | 'record' | 'url';
 
 const App: React.FC = () => {
   const [showMainMenu, setShowMainMenu] = useState<boolean>(true);
@@ -60,9 +62,10 @@ const App: React.FC = () => {
     setProcessingProgress(0);
   };
   
-  const handleModuleSelect = (module: 'upload' | 'record') => {
+  const handleModuleSelect = (module: Module) => {
     setActiveModule(module);
     setShowMainMenu(false);
+    resetState();
   };
   
   const goToMainMenu = () => {
@@ -154,13 +157,28 @@ const App: React.FC = () => {
           <div className="flex rounded-lg mb-6 overflow-hidden">
             <Tab 
               active={activeModule === 'upload'} 
-              onClick={() => setActiveModule('upload')}
+              onClick={() => {
+                setActiveModule('upload');
+                resetState();
+              }}
               label="Upload File"
               icon="📁"
             />
             <Tab 
+              active={activeModule === 'url'} 
+              onClick={() => {
+                setActiveModule('url');
+                resetState();
+              }}
+              label="Google Drive"
+              icon="🔗"
+            />
+            <Tab 
               active={activeModule === 'record'} 
-              onClick={() => setActiveModule('record')}
+              onClick={() => {
+                setActiveModule('record');
+                resetState();
+              }}
               label="Record Audio"
               icon="🎙️"
             />
@@ -168,7 +186,7 @@ const App: React.FC = () => {
 
           {/* Module Content */}
           <div className="bg-gray-50 rounded-lg p-6 mb-6 border border-gray-200">
-            {activeModule === 'upload' ? (
+            {activeModule === 'upload' && (
               <FileUpload 
                 onFileSelected={handleFileSelected}
                 onUploadResponse={handleUploadResponse}
@@ -178,7 +196,21 @@ const App: React.FC = () => {
                 startProcessing={startProcessingSimulation}
                 clearTranscription={clearTranscription}
               />
-            ) : (
+            )}
+            
+            {activeModule === 'url' && (
+              <UrlUpload
+                onFileSelected={handleFileSelected}
+                onUploadResponse={handleUploadResponse}
+                setIsUploading={setIsUploading}
+                setUploadProgress={setUploadProgress}
+                setIsProcessing={setIsProcessing}
+                startProcessing={startProcessingSimulation}
+                clearTranscription={clearTranscription}
+              />
+            )}
+            
+            {activeModule === 'record' && (
               <AudioRecorder 
                 onRecordingComplete={handleRecordingComplete} 
                 onTranscribe={audioSource.file ? handleTranscribe : undefined}
@@ -191,34 +223,21 @@ const App: React.FC = () => {
           <div className="mt-6">
             <AudioPlayer 
               audioUrl={audioSource.url} 
-              onTranscribe={activeModule === 'upload' ? handleTranscribe : undefined}
+              onTranscribe={activeModule !== 'record' ? handleTranscribe : undefined}
             />
           </div>
         )}
 
-        {/* Upload Progress */}
+        {/* Progress Bars */}
         {isUploading && (
           <div className="mt-6">
-            <p className="text-gray-700 mb-2 font-medium">Uploading...</p>
-            <div className="w-full bg-gray-200 rounded-full h-2.5">
-              <div 
-                className="bg-blue-600 h-2.5 rounded-full transition-all duration-300" 
-                style={{ width: `${uploadProgress}%` }}
-              ></div>
-            </div>
+            <ProgressBar progress={uploadProgress} type="upload" />
           </div>
         )}
 
-        {/* Processing Progress */}
         {isProcessing && (
           <div className="mt-6">
-            <p className="text-gray-700 mb-2 font-medium">Processing audio...</p>
-            <div className="w-full bg-gray-200 rounded-full h-2.5">
-              <div 
-                className="bg-green-500 h-2.5 rounded-full transition-all duration-300" 
-                style={{ width: `${processingProgress}%` }}
-              ></div>
-            </div>
+            <ProgressBar progress={processingProgress} type="processing" />
           </div>
         )}
 

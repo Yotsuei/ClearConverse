@@ -3,27 +3,54 @@ import React from 'react';
 
 interface ProgressBarProps {
   progress: number;
+  type: 'upload' | 'processing';
 }
 
-const ProgressBar: React.FC<ProgressBarProps> = ({ progress }) => {
-  // Determine the stage based on progress percentage
+const ProgressBar: React.FC<ProgressBarProps> = ({ progress, type }) => {
+  // Determine the stage based on progress percentage and type
   const getStage = () => {
-    if (progress < 50) return "Uploading file...";
-    if (progress < 75) return "Processing audio...";
-    if (progress < 90) return "Generating transcription...";
-    return "Finalizing results...";
+    if (type === 'upload') {
+      if (progress < 25) return "Starting upload...";
+      if (progress < 50) return "Uploading file...";
+      if (progress < 75) return "Verifying upload...";
+      if (progress < 90) return "Upload complete...";
+      return "Preparing for processing...";
+    } else { // processing
+      if (progress < 25) return "Analyzing audio...";
+      if (progress < 50) return "Processing speech...";
+      if (progress < 75) return "Generating transcription...";
+      if (progress < 90) return "Finalizing results...";
+      return "Transcription complete!";
+    }
+  };
+
+  // Get primary and secondary colors based on type
+  const getBgColor = () => {
+    return type === 'upload' ? 'bg-blue-600' : 'bg-green-600';
+  };
+  
+  const getLightBgColor = () => {
+    return type === 'upload' ? 'bg-blue-100' : 'bg-green-100';
+  };
+  
+  const getBorderColor = () => {
+    return type === 'upload' ? 'border-blue-200' : 'border-green-200';
+  };
+  
+  const getTextColor = () => {
+    return type === 'upload' ? 'text-blue-700' : 'text-green-700';
   };
 
   return (
-    <div className="w-full bg-slate-700/50 p-6 rounded-xl">
+    <div className={`w-full p-4 rounded-lg ${getLightBgColor()} border ${getBorderColor()} mb-6`}>
       <div className="mb-2 flex justify-between items-center">
-        <div className="text-sm font-medium text-slate-300">{getStage()}</div>
-        <div className="text-sm font-medium text-blue-400">{Math.round(progress)}%</div>
+        <div className={`text-sm font-medium ${getTextColor()}`}>{getStage()}</div>
+        <div className={`text-sm font-medium ${getTextColor()}`}>{Math.round(progress)}%</div>
       </div>
-      <div className="relative w-full h-2.5 bg-slate-700 rounded-full overflow-hidden">
+      <div className="relative w-full h-2.5 bg-gray-200 rounded-full overflow-hidden">
         {/* Background pulse animation when in progress */}
         <div 
-          className="absolute inset-0 bg-gradient-to-r from-blue-600 to-cyan-500 opacity-30"
+          className={`absolute inset-0 ${getBgColor()} opacity-30`}
           style={{ 
             animation: progress < 100 ? 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite' : 'none',
           }}
@@ -31,7 +58,7 @@ const ProgressBar: React.FC<ProgressBarProps> = ({ progress }) => {
         
         {/* Actual progress bar */}
         <div 
-          className="h-full bg-gradient-to-r from-blue-500 to-cyan-400 rounded-full transition-all duration-300 ease-out"
+          className={`h-full ${getBgColor()} rounded-full transition-all duration-300 ease-out`}
           style={{ width: `${progress}%` }}
         />
       </div>
@@ -39,24 +66,28 @@ const ProgressBar: React.FC<ProgressBarProps> = ({ progress }) => {
       {/* Processing stages */}
       <div className="mt-4 grid grid-cols-4 gap-2">
         <Stage 
-          title="Upload" 
+          title={type === 'upload' ? "Upload" : "Analyze"}
           isActive={progress > 0}
-          isComplete={progress >= 50}
+          isComplete={progress >= 25}
+          type={type}
         />
         <Stage 
-          title="Process" 
+          title={type === 'upload' ? "Verify" : "Process"}
+          isActive={progress >= 25}
+          isComplete={progress >= 50}
+          type={type}
+        />
+        <Stage 
+          title={type === 'upload' ? "Complete" : "Generate"}
           isActive={progress >= 50}
           isComplete={progress >= 75}
+          type={type}
         />
         <Stage 
-          title="Transcribe" 
+          title="Finalize"
           isActive={progress >= 75}
-          isComplete={progress >= 90}
-        />
-        <Stage 
-          title="Complete" 
-          isActive={progress >= 90}
           isComplete={progress >= 100}
+          type={type}
         />
       </div>
       
@@ -78,15 +109,30 @@ interface StageProps {
   title: string;
   isActive: boolean;
   isComplete: boolean;
+  type: 'upload' | 'processing';
 }
 
-const Stage: React.FC<StageProps> = ({ title, isActive, isComplete }) => {
+const Stage: React.FC<StageProps> = ({ title, isActive, isComplete, type }) => {
+  const getGradient = () => {
+    return type === 'upload' 
+      ? 'bg-gradient-to-r from-blue-500 to-blue-600' 
+      : 'bg-gradient-to-r from-green-500 to-green-600';
+  };
+  
+  const getAnimationColor = () => {
+    return type === 'upload' ? 'bg-blue-600' : 'bg-green-600';
+  };
+  
+  const getTextColor = () => {
+    return type === 'upload' ? 'text-blue-600' : 'text-green-600';
+  };
+
   return (
     <div className="flex flex-col items-center">
       <div 
         className={`w-8 h-8 rounded-full flex items-center justify-center mb-1 transition-colors
-          ${isComplete ? 'bg-gradient-to-r from-blue-500 to-cyan-400 text-white' : 
-            isActive ? 'bg-slate-600 text-white animate-pulse' : 'bg-slate-800 text-slate-500'}`}
+          ${isComplete ? getGradient() + ' text-white' : 
+            isActive ? getAnimationColor() + ' text-white animate-pulse' : 'bg-gray-200 text-gray-500'}`}
       >
         {isComplete ? (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -96,7 +142,7 @@ const Stage: React.FC<StageProps> = ({ title, isActive, isComplete }) => {
           <span className="text-xs">{title.charAt(0)}</span>
         )}
       </div>
-      <span className={`text-xs ${isActive ? 'text-slate-300' : 'text-slate-500'}`}>
+      <span className={`text-xs ${isActive ? getTextColor() : 'text-gray-500'}`}>
         {title}
       </span>
     </div>

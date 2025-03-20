@@ -40,9 +40,6 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
         
         audioContextRef.current = audioContext;
         analyserRef.current = analyser;
-        
-        // Don't connect to destination to avoid feedback loop
-        // source.connect(audioContext.destination);
       } catch (err) {
         console.error('Error accessing microphone:', err);
         setPermission(false);
@@ -212,19 +209,16 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
             )}
           </div>
           
-          {recordingBlob && !isRecording && (
+          {recordingBlob && !isRecording && onTranscribe && (
             <div className="mt-6 text-center w-full">
               <p className="text-green-600 font-medium mb-2">Recording complete!</p>
               
-              {/* Added transcribe button after recording is complete */}
-              {onTranscribe && (
-                <button
-                  onClick={onTranscribe}
-                  className="w-full py-3 px-5 mt-2 text-white font-bold rounded-lg transition-all duration-300 bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg"
-                >
-                  Transcribe Recording
-                </button>
-              )}
+              <button
+                onClick={onTranscribe}
+                className="w-full py-3 px-5 mt-2 text-white font-bold rounded-lg transition-all duration-300 bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg"
+              >
+                Transcribe Recording
+              </button>
             </div>
           )}
         </>

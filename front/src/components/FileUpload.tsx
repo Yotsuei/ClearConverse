@@ -176,6 +176,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
             onClick={(e) => {
               e.stopPropagation();
               setFile(null);
+              clearTranscription();
             }}
             className="ml-2 text-gray-400 hover:text-red-500"
           >
@@ -196,7 +197,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
               : 'bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg'}`
           }
         >
-          Transcribe Audio
+          Upload & Transcribe
         </button>
       ) : (
         <button
