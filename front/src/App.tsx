@@ -1,5 +1,5 @@
 // App.tsx
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import FileUpload from './components/FileUpload';
 import AudioRecorder from './components/AudioRecorder';
 import AudioPlayer from './components/AudioPlayer';
@@ -8,6 +8,7 @@ import { Tab } from './components/Tab';
 import MainMenu from './components/MainMenu';
 import UrlUpload from './components/UrlUpload';
 import ProgressBar from './components/ProgressBar';
+import ResetButton from './components/ResetButton';
 import './index.css';
 
 type AudioSource = {
@@ -27,6 +28,11 @@ const App: React.FC = () => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingProgress, setProcessingProgress] = useState(0);
+  
+  // Add XHR reference to allow cancellation of in-progress requests
+  const xhrRef = useRef<XMLHttpRequest | null>(null);
+  // Add interval reference to clear processing simulation
+  const processingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleUploadResponse = (transcript: string, downloadUrl: string) => {
     setTranscript(transcript);
@@ -47,6 +53,10 @@ const App: React.FC = () => {
   };
 
   const resetState = () => {
+    // Cancel any ongoing requests first
+    cancelTranscription();
+    
+    // Reset all states
     setAudioSource({ file: null, url: null });
     setTranscript(null);
     setDownloadUrl(null);
@@ -78,13 +88,44 @@ const App: React.FC = () => {
   const startProcessingSimulation = () => {
     setIsProcessing(true);
     let progress = 0;
+    
+    // Clear any existing interval
+    if (processingIntervalRef.current) {
+      clearInterval(processingIntervalRef.current);
+    }
+    
+    // Start new interval
     const interval = setInterval(() => {
       progress += 5;
       setProcessingProgress(Math.min(progress, 95)); // Max at 95% to indicate waiting for server
       if (progress >= 95) {
         clearInterval(interval);
+        processingIntervalRef.current = null;
       }
     }, 500);
+    
+    processingIntervalRef.current = interval;
+  };
+
+  // Cancel transcription function
+  const cancelTranscription = () => {
+    // Cancel any ongoing XHR request
+    if (xhrRef.current) {
+      xhrRef.current.abort();
+      xhrRef.current = null;
+    }
+    
+    // Clear processing simulation
+    if (processingIntervalRef.current) {
+      clearInterval(processingIntervalRef.current);
+      processingIntervalRef.current = null;
+    }
+    
+    // Reset progress states
+    setIsUploading(false);
+    setUploadProgress(0);
+    setIsProcessing(false);
+    setProcessingProgress(0);
   };
 
   // Handle transcription from either audio player or recorder
@@ -99,6 +140,9 @@ const App: React.FC = () => {
     try {
       // Implement XMLHttpRequest for progress tracking
       const xhr = new XMLHttpRequest();
+      // Store XHR reference for cancellation
+      xhrRef.current = xhr;
+      
       xhr.open('POST', 'http://localhost:8000/transcribe');
       
       xhr.upload.addEventListener('progress', (event) => {
@@ -109,6 +153,7 @@ const App: React.FC = () => {
       });
 
       xhr.onload = function() {
+        xhrRef.current = null;
         if (xhr.status === 200) {
           setIsUploading(false);
           startProcessingSimulation();
@@ -122,7 +167,14 @@ const App: React.FC = () => {
       };
 
       xhr.onerror = function() {
+        xhrRef.current = null;
+        setIsUploading(false);
         throw new Error('Network error occurred');
+      };
+
+      xhr.onabort = function() {
+        console.log('Transcription request aborted');
+        setIsUploading(false);
       };
 
       xhr.send(formData);
@@ -130,6 +182,7 @@ const App: React.FC = () => {
       console.error('Upload failed:', error);
       alert('There was an error uploading your file.');
       setIsUploading(false);
+      xhrRef.current = null;
     }
   };
 
@@ -229,16 +282,37 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* Progress Bars */}
+        {/* Progress Bars with Cancel Button */}
         {isUploading && (
           <div className="mt-6">
-            <ProgressBar progress={uploadProgress} type="upload" />
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-lg font-semibold text-gray-200">Upload Progress</h3>
+            </div>
+            <ProgressBar progress={uploadProgress} type="upload" onCancel={cancelTranscription} />
           </div>
         )}
 
         {isProcessing && (
           <div className="mt-6">
-            <ProgressBar progress={processingProgress} type="processing" />
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-lg font-semibold text-gray-200">Processing Progress</h3>
+            </div>
+            <ProgressBar progress={processingProgress} type="processing" onCancel={cancelTranscription} />
+          </div>
+        )}
+
+        {/* Reset Button (when audio is loaded but no transcription yet) */}
+        {audioSource.file && !transcript && !isUploading && !isProcessing && (
+          <div className="mt-6">
+            <button
+              onClick={resetState}
+              className="w-full py-3 px-4 bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium rounded-lg transition-colors flex justify-center items-center gap-2"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+              </svg>
+              Reset
+            </button>
           </div>
         )}
 
@@ -251,6 +325,14 @@ const App: React.FC = () => {
           />
         )}
         </div>
+      )}
+      
+      {/* Floating Reset Button - only show when not on main menu */}
+      {!showMainMenu && (audioSource.file || isUploading || isProcessing || transcript) && (
+        <ResetButton 
+          onReset={resetState}
+          isProcessing={isUploading || isProcessing}
+        />
       )}
       
       <footer className="mt-8 text-center text-gray-500 text-sm">

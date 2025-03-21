@@ -4,9 +4,10 @@ import React from 'react';
 interface ProgressBarProps {
   progress: number;
   type: 'upload' | 'processing';
+  onCancel?: () => void;
 }
 
-const ProgressBar: React.FC<ProgressBarProps> = ({ progress, type }) => {
+const ProgressBar: React.FC<ProgressBarProps> = ({ progress, type, onCancel }) => {
   // Determine the stage based on progress percentage and type
   const getStage = () => {
     if (type === 'upload') {
@@ -45,7 +46,23 @@ const ProgressBar: React.FC<ProgressBarProps> = ({ progress, type }) => {
     <div className={`w-full p-4 rounded-lg ${getLightBgColor()} border ${getBorderColor()} mb-6`}>
       <div className="mb-2 flex justify-between items-center">
         <div className={`text-sm font-medium ${getTextColor()}`}>{getStage()}</div>
-        <div className={`text-sm font-medium ${getTextColor()}`}>{Math.round(progress)}%</div>
+        <div className="flex items-center gap-3">
+          <div className={`text-sm font-medium ${getTextColor()}`}>{Math.round(progress)}%</div>
+          
+          {/* Cancel button */}
+          {onCancel && progress < 100 && (
+            <button 
+              onClick={onCancel}
+              className="text-red-400 hover:text-red-300 text-sm font-medium flex items-center gap-1"
+              aria-label="Cancel transcription"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+              </svg>
+              Cancel
+            </button>
+          )}
+        </div>
       </div>
       <div className="relative w-full h-2.5 bg-gray-700 rounded-full overflow-hidden">
         {/* Background pulse animation when in progress */}
