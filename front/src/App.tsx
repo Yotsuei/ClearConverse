@@ -7,6 +7,7 @@ import TranscriptionDisplay from './components/TranscriptionDisplay';
 import MainMenu from './components/MainMenu';
 import ProgressBar from './components/ProgressBar';
 import ResetButton from './components/ResetButton';
+import ClearButton from './components/ClearButton';
 import FloatingActionButton from './components/FloatingActionButton';
 import './index.css';
 
@@ -336,6 +337,16 @@ const App: React.FC = () => {
           isProcessing={isUploading || isProcessing}
           hasTranscription={Boolean(transcript)}
         />
+      )}
+      
+      {/* Adding ClearButton as a separate floating button on the left side */}
+      {!showMainMenu && audioSource.file && transcript && !isUploading && !isProcessing && (
+        <div className="fixed bottom-6 left-6 z-10">
+          <ClearButton 
+            onClear={clearTranscription} 
+            isProcessing={false} 
+          />
+        </div>
       )}
       
       <footer className="mt-8 text-center text-gray-500 text-sm">
