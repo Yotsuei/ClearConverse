@@ -154,6 +154,11 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
 
   return (
     <div className="flex flex-col items-center">
+      <h2 className="text-xl font-bold text-gray-200 mb-4">Record Audio</h2>
+      <p className="text-gray-400 mb-6 text-center">
+        Record audio directly from your microphone and transcribe it instantly.
+      </p>
+      
       {permission === false && (
         <div className="bg-red-900 text-red-200 p-4 rounded-lg mb-4 w-full border border-red-700">
           <p className="font-medium">Microphone access denied</p>
@@ -233,6 +238,22 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
               </button>
             </div>
           )}
+          
+          {/* Recording tips */}
+          <div className="mt-6 bg-gray-700 p-4 rounded-lg text-sm border border-gray-600 w-full">
+            <h3 className="font-semibold text-gray-200 mb-2 flex items-center">
+              <svg className="w-5 h-5 mr-2 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+              Recording Tips
+            </h3>
+            <ul className="list-disc list-inside text-gray-300 space-y-1">
+              <li>Speak clearly and at a moderate pace</li>
+              <li>Minimize background noise for better results</li>
+              <li>Keep the microphone at a consistent distance</li>
+              <li>Recordings are saved as WAV files</li>
+            </ul>
+          </div>
         </>
       )}
     </div>

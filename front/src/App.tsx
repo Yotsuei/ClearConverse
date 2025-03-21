@@ -4,7 +4,6 @@ import FileUpload from './components/FileUpload';
 import AudioRecorder from './components/AudioRecorder';
 import AudioPlayer from './components/AudioPlayer';
 import TranscriptionDisplay from './components/TranscriptionDisplay';
-import { Tab } from './components/Tab';
 import MainMenu from './components/MainMenu';
 import ProgressBar from './components/ProgressBar';
 import ResetButton from './components/ResetButton';
@@ -185,6 +184,60 @@ const App: React.FC = () => {
     }
   };
 
+  // Render different content based on the active module
+  const renderModuleContent = () => {
+    if (activeModule === 'upload') {
+      return (
+        <>
+          <div className="bg-gray-750 rounded-lg p-6 mb-6 border border-gray-700">
+            <FileUpload 
+              onFileSelected={handleFileSelected}
+              onUploadResponse={handleUploadResponse}
+              setIsUploading={setIsUploading}
+              setUploadProgress={setUploadProgress}
+              setIsProcessing={setIsProcessing}
+              startProcessing={startProcessingSimulation}
+              clearTranscription={clearTranscription}
+            />
+          </div>
+
+          {/* Audio Player - only for upload module */}
+          {audioSource.url && (
+            <div className="mt-6">
+              <AudioPlayer 
+                audioUrl={audioSource.url} 
+                onTranscribe={handleTranscribe}
+              />
+            </div>
+          )}
+        </>
+      );
+    } else if (activeModule === 'record') {
+      return (
+        <>
+          <div className="bg-gray-750 rounded-lg p-6 mb-6 border border-gray-700">
+            <AudioRecorder 
+              onRecordingComplete={handleRecordingComplete} 
+              onTranscribe={audioSource.file ? handleTranscribe : undefined}
+            />
+          </div>
+
+          {/* Audio Player - only shown after recording is completed */}
+          {audioSource.url && !isUploading && !isProcessing && (
+            <div className="mt-6">
+              <AudioPlayer 
+                audioUrl={audioSource.url} 
+                onTranscribe={undefined} // No need for transcribe button as it's in the recorder
+              />
+            </div>
+          )}
+        </>
+      );
+    }
+    
+    return null;
+  };
+
   return (
     <div className="min-h-screen w-full bg-gray-900 flex flex-col items-center justify-center p-6 text-gray-200">
       {showMainMenu ? (
@@ -193,7 +246,7 @@ const App: React.FC = () => {
         <div className="w-full max-w-3xl bg-gray-800 shadow-xl rounded-xl p-8 border border-gray-700">
           <div className="flex justify-between items-center mb-6">
             <h1 className="text-3xl font-extrabold tracking-tight text-gray-100">
-              Speech Transcription
+              {activeModule === 'upload' ? 'File Upload Transcription' : 'Audio Recording Transcription'}
             </h1>
             <button 
               onClick={goToMainMenu}
@@ -206,102 +259,51 @@ const App: React.FC = () => {
             </button>
           </div>
           
-          {/* Module Selection Tabs */}
-          <div className="flex rounded-lg mb-6 overflow-hidden border border-gray-700">
-            <Tab 
-              active={activeModule === 'upload'} 
-              onClick={() => {
-                setActiveModule('upload');
-                resetState();
-              }}
-              label="Upload File"
-              icon="📁"
-            />
-            <Tab 
-              active={activeModule === 'record'} 
-              onClick={() => {
-                setActiveModule('record');
-                resetState();
-              }}
-              label="Record Audio"
-              icon="🎙️"
-            />
-          </div>
+          {/* Module Content - No more tabs */}
+          {renderModuleContent()}
 
-          {/* Module Content */}
-          <div className="bg-gray-750 rounded-lg p-6 mb-6 border border-gray-700">
-            {activeModule === 'upload' && (
-              <FileUpload 
-                onFileSelected={handleFileSelected}
-                onUploadResponse={handleUploadResponse}
-                setIsUploading={setIsUploading}
-                setUploadProgress={setUploadProgress}
-                setIsProcessing={setIsProcessing}
-                startProcessing={startProcessingSimulation}
-                clearTranscription={clearTranscription}
-              />
-            )}
-            
-            {activeModule === 'record' && (
-              <AudioRecorder 
-                onRecordingComplete={handleRecordingComplete} 
-                onTranscribe={audioSource.file ? handleTranscribe : undefined}
-              />
-            )}
-          </div>
-
-        {/* Audio Player */}
-        {audioSource.url && (
-          <div className="mt-6">
-            <AudioPlayer 
-              audioUrl={audioSource.url} 
-              onTranscribe={activeModule !== 'record' ? handleTranscribe : undefined}
-            />
-          </div>
-        )}
-
-        {/* Progress Bars with Cancel Button */}
-        {isUploading && (
-          <div className="mt-6">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-lg font-semibold text-gray-200">Upload Progress</h3>
+          {/* Progress Bars with Cancel Button */}
+          {isUploading && (
+            <div className="mt-6">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-lg font-semibold text-gray-200">Upload Progress</h3>
+              </div>
+              <ProgressBar progress={uploadProgress} type="upload" onCancel={cancelTranscription} />
             </div>
-            <ProgressBar progress={uploadProgress} type="upload" onCancel={cancelTranscription} />
-          </div>
-        )}
+          )}
 
-        {isProcessing && (
-          <div className="mt-6">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-lg font-semibold text-gray-200">Processing Progress</h3>
+          {isProcessing && (
+            <div className="mt-6">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-lg font-semibold text-gray-200">Processing Progress</h3>
+              </div>
+              <ProgressBar progress={processingProgress} type="processing" onCancel={cancelTranscription} />
             </div>
-            <ProgressBar progress={processingProgress} type="processing" onCancel={cancelTranscription} />
-          </div>
-        )}
+          )}
 
-        {/* Reset Button (when audio is loaded but no transcription yet) */}
-        {audioSource.file && !transcript && !isUploading && !isProcessing && (
-          <div className="mt-6">
-            <button
-              onClick={resetState}
-              className="w-full py-3 px-4 bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium rounded-lg transition-colors flex justify-center items-center gap-2"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-              </svg>
-              Reset
-            </button>
-          </div>
-        )}
+          {/* Reset Button (when audio is loaded but no transcription yet) */}
+          {audioSource.file && !transcript && !isUploading && !isProcessing && (
+            <div className="mt-6">
+              <button
+                onClick={resetState}
+                className="w-full py-3 px-4 bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium rounded-lg transition-colors flex justify-center items-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                </svg>
+                Reset
+              </button>
+            </div>
+          )}
 
-        {/* Transcription Display */}
-        {transcript && downloadUrl && (
-          <TranscriptionDisplay 
-            transcript={transcript} 
-            downloadUrl={downloadUrl}
-            onClear={resetState}
-          />
-        )}
+          {/* Transcription Display */}
+          {transcript && downloadUrl && (
+            <TranscriptionDisplay 
+              transcript={transcript} 
+              downloadUrl={downloadUrl}
+              onClear={resetState}
+            />
+          )}
         </div>
       )}
       
