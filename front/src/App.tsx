@@ -7,6 +7,7 @@ import TranscriptionDisplay from './components/TranscriptionDisplay';
 import MainMenu from './components/MainMenu';
 import ProgressBar from './components/ProgressBar';
 import ResetButton from './components/ResetButton';
+import FloatingActionButton from './components/FloatingActionButton';
 import './index.css';
 
 type AudioSource = {
@@ -65,6 +66,7 @@ const App: React.FC = () => {
   };
   
   const clearTranscription = () => {
+    // Only clear the transcription result, keep the audio file
     setTranscript(null);
     setDownloadUrl(null);
     setIsProcessing(false);
@@ -238,6 +240,9 @@ const App: React.FC = () => {
     return null;
   };
 
+  // Determine if we should show the "Clear" button
+  const shouldShowClearButton = audioSource.file && transcript;
+
   return (
     <div className="min-h-screen w-full bg-gray-900 flex flex-col items-center justify-center p-6 text-gray-200">
       {showMainMenu ? (
@@ -281,12 +286,12 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {/* Reset Button (when audio is loaded but no transcription yet) */}
+          {/* Reset and Clear Buttons (when audio is loaded but no transcription yet) */}
           {audioSource.file && !transcript && !isUploading && !isProcessing && (
-            <div className="mt-6">
+            <div className="mt-6 flex gap-4">
               <button
                 onClick={resetState}
-                className="w-full py-3 px-4 bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium rounded-lg transition-colors flex justify-center items-center gap-2"
+                className="flex-1 py-3 px-4 bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium rounded-lg transition-colors flex justify-center items-center gap-2"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
@@ -301,17 +306,35 @@ const App: React.FC = () => {
             <TranscriptionDisplay 
               transcript={transcript} 
               downloadUrl={downloadUrl}
-              onClear={resetState}
+              onClear={clearTranscription}
+              onReset={resetState}
             />
+          )}
+          
+          {/* Clear Transcription Button (when both audio and transcript exist) */}
+          {shouldShowClearButton && !isUploading && !isProcessing && (
+            <div className="mt-4 flex justify-end">
+              <button
+                onClick={clearTranscription}
+                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium rounded-lg transition-colors flex items-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                </svg>
+                Clear Transcription Only
+              </button>
+            </div>
           )}
         </div>
       )}
       
-      {/* Floating Reset Button - only show when not on main menu */}
+      {/* Floating Reset and Clear Buttons - only show when not on main menu */}
       {!showMainMenu && (audioSource.file || isUploading || isProcessing || transcript) && (
         <ResetButton 
           onReset={resetState}
+          onClear={clearTranscription}
           isProcessing={isUploading || isProcessing}
+          hasTranscription={Boolean(transcript)}
         />
       )}
       

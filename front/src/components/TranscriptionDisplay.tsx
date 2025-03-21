@@ -5,16 +5,18 @@ interface TranscriptionDisplayProps {
   transcript: string;
   downloadUrl: string;
   onClear: () => void;
+  onReset: () => void;
 }
 
 const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({ 
   transcript, 
   downloadUrl,
-  onClear
+  onClear,
+  onReset
 }) => {
   const [expanded, setExpanded] = useState(false);
   const [copySuccess, setCopySuccess] = useState<string | null>(null);
-  const [showConfirmReset, setShowConfirmReset] = useState(false);
+  const [showConfirmDialog, setShowConfirmDialog] = useState<string | null>(null);
 
   // Parse the transcript to highlight speaker segments
   const formatTranscript = (text: string) => {
@@ -65,16 +67,24 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
   };
 
   const handleClearConfirm = () => {
-    setShowConfirmReset(true);
+    setShowConfirmDialog('clear');
   };
 
-  const handleClearCancel = () => {
-    setShowConfirmReset(false);
+  const handleResetConfirm = () => {
+    setShowConfirmDialog('reset');
   };
 
-  const handleClearConfirmed = () => {
-    setShowConfirmReset(false);
-    onClear();
+  const handleDialogCancel = () => {
+    setShowConfirmDialog(null);
+  };
+
+  const handleActionConfirmed = () => {
+    if (showConfirmDialog === 'clear') {
+      onClear();
+    } else if (showConfirmDialog === 'reset') {
+      onReset();
+    }
+    setShowConfirmDialog(null);
   };
 
   // Calculate statistics
@@ -89,38 +99,60 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-2xl font-bold text-gray-200">Transcription Result</h2>
         
-        {/* Clear/Reset button */}
-        <button
-          onClick={handleClearConfirm}
-          className="flex items-center text-red-400 hover:text-red-300 transition-colors"
-        >
-          <svg className="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-          </svg>
-          Clear Transcription
-        </button>
+        {/* Action buttons */}
+        <div className="flex gap-3">
+          <button
+            onClick={handleClearConfirm}
+            className="flex items-center text-yellow-400 hover:text-yellow-300 transition-colors"
+            title="Clear transcription but keep audio"
+          >
+            <svg className="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+            </svg>
+            Clear
+          </button>
+          
+          <button
+            onClick={handleResetConfirm}
+            className="flex items-center text-red-400 hover:text-red-300 transition-colors"
+            title="Reset everything (audio and transcription)"
+          >
+            <svg className="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+            </svg>
+            Reset All
+          </button>
+        </div>
       </div>
       
-      {/* Confirmation modal for reset */}
-      {showConfirmReset && (
+      {/* Confirmation modal for actions */}
+      {showConfirmDialog && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 shadow-lg max-w-md">
-            <h3 className="text-xl font-bold mb-4 text-gray-200">Confirm Reset</h3>
+            <h3 className="text-xl font-bold mb-4 text-gray-200">
+              {showConfirmDialog === 'clear' ? 'Clear Transcription' : 'Reset Everything'}
+            </h3>
             <p className="text-gray-300 mb-6">
-              Are you sure you want to clear the transcription? This action cannot be undone.
+              {showConfirmDialog === 'clear' 
+                ? 'Are you sure you want to clear the transcription? The audio file will be kept.' 
+                : 'Are you sure you want to reset everything? This will clear both the transcription and audio file.'}
             </p>
             <div className="flex justify-end gap-3">
               <button
-                onClick={handleClearCancel}
+                onClick={handleDialogCancel}
                 className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium rounded-lg transition-colors"
               >
                 Cancel
               </button>
               <button
-                onClick={handleClearConfirmed}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-colors"
+                onClick={handleActionConfirmed}
+                className={`px-4 py-2 ${
+                  showConfirmDialog === 'clear' 
+                    ? 'bg-yellow-600 hover:bg-yellow-700' 
+                    : 'bg-red-600 hover:bg-red-700'
+                } text-white font-medium rounded-lg transition-colors`}
               >
-                Yes, Clear
+                {showConfirmDialog === 'clear' ? 'Yes, Clear' : 'Yes, Reset'}
               </button>
             </div>
           </div>
@@ -171,14 +203,26 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
           Download Transcript
         </a>
         
+        {/* Clear button (keeps audio) */}
         <button
           onClick={handleClearConfirm}
+          className="flex items-center px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white font-medium rounded-lg transition-colors shadow-sm"
+        >
+          <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+          </svg>
+          Clear Transcription
+        </button>
+        
+        {/* Reset button (clears everything) */}
+        <button
+          onClick={handleResetConfirm}
           className="flex items-center px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium rounded-lg transition-colors shadow-sm"
         >
           <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
           </svg>
-          Reset
+          Reset All
         </button>
         
         <button
