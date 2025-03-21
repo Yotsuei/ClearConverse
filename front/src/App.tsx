@@ -8,6 +8,7 @@ import { Tab } from './components/Tab';
 import MainMenu from './components/MainMenu';
 import UrlUpload from './components/UrlUpload';
 import ProgressBar from './components/ProgressBar';
+import './index.css';
 
 type AudioSource = {
   file: File | null;
@@ -133,18 +134,18 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen w-full bg-gray-50 flex flex-col items-center justify-center p-6 text-gray-800">
+    <div className="min-h-screen w-full bg-gray-900 flex flex-col items-center justify-center p-6 text-gray-200">
       {showMainMenu ? (
         <MainMenu onSelectModule={handleModuleSelect} />
       ) : (
-        <div className="w-full max-w-3xl bg-white shadow-xl rounded-xl p-8 border border-gray-200">
+        <div className="w-full max-w-3xl bg-gray-800 shadow-xl rounded-xl p-8 border border-gray-700">
           <div className="flex justify-between items-center mb-6">
-            <h1 className="text-3xl font-extrabold tracking-tight text-gray-900">
+            <h1 className="text-3xl font-extrabold tracking-tight text-gray-100">
               Speech Transcription
             </h1>
             <button 
               onClick={goToMainMenu}
-              className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-sm font-medium"
+              className="text-blue-400 hover:text-blue-300 flex items-center gap-1 text-sm font-medium"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
@@ -154,7 +155,7 @@ const App: React.FC = () => {
           </div>
           
           {/* Module Selection Tabs */}
-          <div className="flex rounded-lg mb-6 overflow-hidden">
+          <div className="flex rounded-lg mb-6 overflow-hidden border border-gray-700">
             <Tab 
               active={activeModule === 'upload'} 
               onClick={() => {
@@ -185,7 +186,7 @@ const App: React.FC = () => {
           </div>
 
           {/* Module Content */}
-          <div className="bg-gray-50 rounded-lg p-6 mb-6 border border-gray-200">
+          <div className="bg-gray-750 rounded-lg p-6 mb-6 border border-gray-700">
             {activeModule === 'upload' && (
               <FileUpload 
                 onFileSelected={handleFileSelected}

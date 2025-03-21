@@ -28,9 +28,9 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
         if (part.match(/\[SPEAKER_[A-Z]\]/)) {
           const speaker = part.replace(/[\[\]]/g, '');
           // Assign different colors based on speaker
-          const color = speaker === 'SPEAKER_A' ? 'text-blue-600' : 
-                       speaker === 'SPEAKER_B' ? 'text-green-600' : 
-                       speaker === 'SPEAKER_C' ? 'text-purple-600' : 'text-orange-600';
+          const color = speaker === 'SPEAKER_A' ? 'text-blue-400' : 
+                       speaker === 'SPEAKER_B' ? 'text-gray-300' : 
+                       speaker === 'SPEAKER_C' ? 'text-gray-400' : 'text-gray-500';
           return (
             <span key={index} className={`font-semibold ${color}`}>
               {part.replace('SPEAKER_A', 'Speaker A')
@@ -71,11 +71,11 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
   const duration = durationMatch ? parseFloat(durationMatch[1]).toFixed(1) : "N/A";
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-6 mt-6 shadow-sm">
-      <h2 className="text-2xl font-bold mb-4 text-gray-800">Transcription Result</h2>
+    <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 mt-6 shadow-sm">
+      <h2 className="text-2xl font-bold mb-4 text-gray-200">Transcription Result</h2>
       
       <div 
-        className={`bg-gray-50 p-4 rounded-lg text-gray-700 border border-gray-200 whitespace-pre-wrap overflow-y-auto transition-all duration-300 shadow-inner ${
+        className={`bg-gray-750 p-4 rounded-lg text-gray-300 border border-gray-700 whitespace-pre-wrap overflow-y-auto transition-all duration-300 shadow-inner ${
           expanded ? 'max-h-[600px]' : 'max-h-80'
         }`}
       >
@@ -86,7 +86,7 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
       {transcript.length > 500 && (
         <button
           onClick={() => setExpanded(!expanded)}
-          className="mt-2 text-blue-600 hover:text-blue-800 text-sm font-medium inline-flex items-center"
+          className="mt-2 text-blue-400 hover:text-blue-300 text-sm font-medium inline-flex items-center"
         >
           {expanded ? (
             <>
@@ -110,7 +110,7 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
         <a
           href={`http://localhost:8000${downloadUrl}`}
           download="transcript.txt"
-          className="flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors shadow-sm"
+          className="flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors shadow-sm"
         >
           <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
@@ -120,7 +120,7 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
         
         <button
           onClick={onClear}
-          className="flex items-center px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium rounded-lg transition-colors shadow-sm"
+          className="flex items-center px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium rounded-lg transition-colors shadow-sm"
         >
           <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
@@ -130,7 +130,7 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
         
         <button
           onClick={handleCopyToClipboard}
-          className="flex items-center px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium rounded-lg transition-colors shadow-sm relative"
+          className="flex items-center px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium rounded-lg transition-colors shadow-sm relative"
         >
           <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path>
@@ -138,7 +138,7 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
           {copySuccess || "Copy to Clipboard"}
           
           {copySuccess && (
-            <span className="absolute top-0 right-0 -mt-2 -mr-2 bg-green-500 text-white text-xs px-2 py-1 rounded-full">
+            <span className="absolute top-0 right-0 -mt-2 -mr-2 bg-green-600 text-white text-xs px-2 py-1 rounded-full">
               {copySuccess}
             </span>
           )}
@@ -147,31 +147,31 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
       
       {/* Stats section */}
       <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
-          <p className="text-xs text-blue-600 font-medium">Word Count</p>
-          <p className="text-2xl font-bold text-blue-800">{wordCount}</p>
+        <div className="bg-gray-700 p-3 rounded-lg border border-gray-600">
+          <p className="text-xs text-blue-400 font-medium">Word Count</p>
+          <p className="text-2xl font-bold text-gray-200">{wordCount}</p>
         </div>
         
-        <div className="bg-green-50 p-3 rounded-lg border border-green-100">
-          <p className="text-xs text-green-600 font-medium">Duration (sec)</p>
-          <p className="text-2xl font-bold text-green-800">{duration}</p>
+        <div className="bg-gray-700 p-3 rounded-lg border border-gray-600">
+          <p className="text-xs text-blue-400 font-medium">Duration (sec)</p>
+          <p className="text-2xl font-bold text-gray-200">{duration}</p>
         </div>
         
-        <div className="bg-purple-50 p-3 rounded-lg border border-purple-100">
-          <p className="text-xs text-purple-600 font-medium">Speaker A Turns</p>
-          <p className="text-2xl font-bold text-purple-800">{speakerATurns || 'N/A'}</p>
+        <div className="bg-gray-700 p-3 rounded-lg border border-gray-600">
+          <p className="text-xs text-blue-400 font-medium">Speaker A Turns</p>
+          <p className="text-2xl font-bold text-gray-200">{speakerATurns || 'N/A'}</p>
         </div>
         
-        <div className="bg-orange-50 p-3 rounded-lg border border-orange-100">
-          <p className="text-xs text-orange-600 font-medium">Speaker B Turns</p>
-          <p className="text-2xl font-bold text-orange-800">{speakerBTurns || 'N/A'}</p>
+        <div className="bg-gray-700 p-3 rounded-lg border border-gray-600">
+          <p className="text-xs text-blue-400 font-medium">Speaker B Turns</p>
+          <p className="text-2xl font-bold text-gray-200">{speakerBTurns || 'N/A'}</p>
         </div>
       </div>
 
       {/* Additional information */}
-      <div className="mt-6 bg-gray-50 p-4 rounded-lg border border-gray-200">
-        <h3 className="text-lg font-semibold mb-2 text-gray-800">About This Transcription</h3>
-        <p className="text-gray-600 text-sm">
+      <div className="mt-6 bg-gray-750 p-4 rounded-lg border border-gray-700">
+        <h3 className="text-lg font-semibold mb-2 text-gray-200">About This Transcription</h3>
+        <p className="text-gray-400 text-sm">
           This transcription was generated using advanced speech recognition technology. 
           {speakerATurns > 0 && speakerBTurns > 0 ? 
             " Speaker diarization was applied to identify different speakers in the conversation." : 

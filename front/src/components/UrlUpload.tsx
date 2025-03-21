@@ -224,7 +224,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
   return (
     <div className="flex flex-col">
       <div className="mb-4">
-        <label htmlFor="drive-url" className="block text-sm font-medium text-gray-700 mb-1">
+        <label htmlFor="drive-url" className="block text-sm font-medium text-gray-300 mb-1">
           Google Drive Audio URL
         </label>
         <div className="relative">
@@ -235,17 +235,17 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
             onChange={handleUrlChange}
             onPaste={handlePaste}
             placeholder="https://drive.google.com/file/d/..."
-            className={`w-full p-3 pr-10 border rounded-lg focus:outline-none focus:ring-2 ${
+            className={`w-full p-3 pr-10 bg-gray-700 text-gray-200 border rounded-lg focus:outline-none focus:ring-2 ${
               url && !isValidUrl 
-                ? 'border-red-300 focus:ring-red-500 focus:border-red-500' 
-                : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'
+                ? 'border-red-500 focus:ring-red-500 focus:border-red-500' 
+                : 'border-gray-600 focus:ring-blue-500 focus:border-blue-500'
             }`}
           />
           {url && (
             <button
               type="button"
               onClick={handleClearUrl}
-              className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-500"
+              className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-300"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
@@ -254,14 +254,14 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
           )}
         </div>
         {urlError && (
-          <p className="mt-1 text-sm text-red-600">{urlError}</p>
+          <p className="mt-1 text-sm text-red-400">{urlError}</p>
         )}
-        <p className="mt-1 text-sm text-gray-500">
+        <p className="mt-1 text-sm text-gray-400">
           Paste a link to a Google Drive audio file. Make sure the file is publicly accessible.
         </p>
       </div>
       
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+      <div className="bg-gray-700 border border-gray-600 rounded-lg p-4 mb-4">
         <div className="flex items-start">
           <div className="flex-shrink-0">
             <svg className="h-5 w-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -269,8 +269,8 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
             </svg>
           </div>
           <div className="ml-3">
-            <h3 className="text-sm font-medium text-blue-800">How to get a shareable link from Google Drive</h3>
-            <div className="mt-2 text-sm text-blue-700">
+            <h3 className="text-sm font-medium text-gray-200">How to get a shareable link from Google Drive</h3>
+            <div className="mt-2 text-sm text-gray-400">
               <ol className="list-decimal pl-5 space-y-1">
                 <li>Open your file in Google Drive</li>
                 <li>Click on "Share" in the top right</li>
@@ -288,7 +288,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
           disabled={!url || !isValidUrl}
           className={`w-full py-3 px-5 text-white font-bold rounded-lg transition-all duration-300 
             ${!url || !isValidUrl
-              ? 'bg-gray-400 cursor-not-allowed' 
+              ? 'bg-gray-600 cursor-not-allowed' 
               : 'bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg'}`
           }
         >

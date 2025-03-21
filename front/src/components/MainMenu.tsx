@@ -9,10 +9,10 @@ const MainMenu: React.FC<MainMenuProps> = ({ onSelectModule }) => {
   return (
     <div className="w-full max-w-4xl mx-auto">
       <div className="text-center mb-10">
-        <h1 className="text-5xl font-extrabold text-gray-900 mb-4">
-          Speech <span className="text-blue-600">Transcription</span> Tool
+        <h1 className="text-5xl font-extrabold text-gray-100 mb-4">
+          Speech <span className="text-blue-400">Transcription</span> Tool
         </h1>
-        <p className="text-xl text-gray-600 max-w-3xl mx-auto">
+        <p className="text-xl text-gray-400 max-w-3xl mx-auto">
           Convert your audio files or recordings into text with our advanced speech recognition technology.
         </p>
       </div>
@@ -21,16 +21,16 @@ const MainMenu: React.FC<MainMenuProps> = ({ onSelectModule }) => {
         {/* Upload Audio Card */}
         <div 
           onClick={() => onSelectModule('upload')}
-          className="bg-white rounded-xl overflow-hidden shadow-lg border border-gray-200 transition-all duration-300 hover:shadow-xl hover:translate-y-[-8px] cursor-pointer"
+          className="bg-gray-800 rounded-xl overflow-hidden shadow-lg border border-gray-700 transition-all duration-300 hover:shadow-xl hover:translate-y-[-8px] cursor-pointer"
         >
-          <div className="h-48 bg-gradient-to-r from-blue-500 to-blue-600 flex items-center justify-center">
-            <svg className="w-24 h-24 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <div className="h-48 bg-gradient-to-r from-blue-800 to-blue-900 flex items-center justify-center">
+            <svg className="w-24 h-24 text-gray-200" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
             </svg>
           </div>
           <div className="p-6">
-            <h3 className="text-2xl font-bold text-gray-800 mb-2">Upload File</h3>
-            <p className="text-gray-600 mb-4">
+            <h3 className="text-2xl font-bold text-gray-200 mb-2">Upload File</h3>
+            <p className="text-gray-400 mb-4">
               Upload your audio files for transcription. Supports MP3, WAV, M4A, and OGG formats.
             </p>
             <div className="flex items-center text-sm text-gray-500">
@@ -48,16 +48,16 @@ const MainMenu: React.FC<MainMenuProps> = ({ onSelectModule }) => {
         {/* Google Drive URL Card */}
         <div 
           onClick={() => onSelectModule('url')}
-          className="bg-white rounded-xl overflow-hidden shadow-lg border border-gray-200 transition-all duration-300 hover:shadow-xl hover:translate-y-[-8px] cursor-pointer"
+          className="bg-gray-800 rounded-xl overflow-hidden shadow-lg border border-gray-700 transition-all duration-300 hover:shadow-xl hover:translate-y-[-8px] cursor-pointer"
         >
-          <div className="h-48 bg-gradient-to-r from-green-500 to-green-600 flex items-center justify-center">
-            <svg className="w-24 h-24 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <div className="h-48 bg-gradient-to-r from-gray-700 to-gray-800 flex items-center justify-center">
+            <svg className="w-24 h-24 text-gray-200" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path>
             </svg>
           </div>
           <div className="p-6">
-            <h3 className="text-2xl font-bold text-gray-800 mb-2">Google Drive</h3>
-            <p className="text-gray-600 mb-4">
+            <h3 className="text-2xl font-bold text-gray-200 mb-2">Google Drive</h3>
+            <p className="text-gray-400 mb-4">
               Transcribe audio directly from Google Drive using a shareable URL. No download needed.
             </p>
             <div className="flex items-center text-sm text-gray-500">
@@ -66,7 +66,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ onSelectModule }) => {
               </svg>
               Must be publicly accessible
             </div>
-            <button className="mt-5 w-full py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg transition-colors">
+            <button className="mt-5 w-full py-3 bg-gray-600 hover:bg-gray-500 text-white font-bold rounded-lg transition-colors">
               Paste Drive URL
             </button>
           </div>
@@ -75,16 +75,16 @@ const MainMenu: React.FC<MainMenuProps> = ({ onSelectModule }) => {
         {/* Record Audio Card */}
         <div 
           onClick={() => onSelectModule('record')}
-          className="bg-white rounded-xl overflow-hidden shadow-lg border border-gray-200 transition-all duration-300 hover:shadow-xl hover:translate-y-[-8px] cursor-pointer"
+          className="bg-gray-800 rounded-xl overflow-hidden shadow-lg border border-gray-700 transition-all duration-300 hover:shadow-xl hover:translate-y-[-8px] cursor-pointer"
         >
-          <div className="h-48 bg-gradient-to-r from-red-500 to-red-600 flex items-center justify-center">
-            <svg className="w-24 h-24 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <div className="h-48 bg-gradient-to-r from-gray-600 to-gray-700 flex items-center justify-center">
+            <svg className="w-24 h-24 text-gray-200" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>
             </svg>
           </div>
           <div className="p-6">
-            <h3 className="text-2xl font-bold text-gray-800 mb-2">Record Audio</h3>
-            <p className="text-gray-600 mb-4">
+            <h3 className="text-2xl font-bold text-gray-200 mb-2">Record Audio</h3>
+            <p className="text-gray-400 mb-4">
               Record audio directly from your microphone for instant transcription.
             </p>
             <div className="flex items-center text-sm text-gray-500">
@@ -93,7 +93,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ onSelectModule }) => {
               </svg>
               High-quality audio recording
             </div>
-            <button className="mt-5 w-full py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg transition-colors">
+            <button className="mt-5 w-full py-3 bg-gray-600 hover:bg-gray-500 text-white font-bold rounded-lg transition-colors">
               Start Recording
             </button>
           </div>

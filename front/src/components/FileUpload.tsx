@@ -135,7 +135,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
     <div className="flex flex-col items-center">
       <div 
         className={`w-full border-2 border-dashed rounded-lg p-6 mb-4 cursor-pointer text-center transition-colors
-          ${dragActive ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-blue-400'}`}
+          ${dragActive ? 'border-blue-500 bg-gray-700' : 'border-gray-600 hover:border-blue-400'}`}
         onDragEnter={handleDrag}
         onDragLeave={handleDrag}
         onDragOver={handleDrag}
@@ -151,10 +151,10 @@ const FileUpload: React.FC<FileUploadProps> = ({
         />
         
         <div className="flex flex-col items-center justify-center py-5">
-          <svg className="w-10 h-10 mb-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <svg className="w-10 h-10 mb-3 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
           </svg>
-          <p className="mb-2 text-sm text-gray-500">
+          <p className="mb-2 text-sm text-gray-400">
             <span className="font-semibold">Click to upload</span> or drag and drop
           </p>
           <p className="text-xs text-gray-500">MP3, WAV, M4A or OGG (MAX. 20MB)</p>
@@ -162,15 +162,15 @@ const FileUpload: React.FC<FileUploadProps> = ({
       </div>
       
       {file && (
-        <div className="w-full bg-gray-100 rounded-lg p-3 mb-4 flex items-center">
-          <div className="bg-blue-100 rounded-lg p-2 mr-3">
-            <svg className="w-6 h-6 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <div className="w-full bg-gray-700 rounded-lg p-3 mb-4 flex items-center">
+          <div className="bg-blue-900 rounded-lg p-2 mr-3">
+            <svg className="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path>
             </svg>
           </div>
           <div className="flex-grow truncate">
-            <p className="text-sm font-medium truncate">{file.name}</p>
-            <p className="text-xs text-gray-500">{(file.size / (1024 * 1024)).toFixed(2)} MB</p>
+            <p className="text-sm font-medium truncate text-gray-200">{file.name}</p>
+            <p className="text-xs text-gray-400">{(file.size / (1024 * 1024)).toFixed(2)} MB</p>
           </div>
           <button
             onClick={(e) => {
@@ -178,7 +178,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
               setFile(null);
               clearTranscription();
             }}
-            className="ml-2 text-gray-400 hover:text-red-500"
+            className="ml-2 text-gray-400 hover:text-red-400"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
@@ -193,7 +193,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
           disabled={!file}
           className={`w-full py-3 px-5 text-white font-bold rounded-lg transition-all duration-300 
             ${!file 
-              ? 'bg-gray-400 cursor-not-allowed' 
+              ? 'bg-gray-600 cursor-not-allowed' 
               : 'bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg'}`
           }
         >

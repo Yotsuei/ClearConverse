@@ -26,19 +26,19 @@ const ProgressBar: React.FC<ProgressBarProps> = ({ progress, type }) => {
 
   // Get primary and secondary colors based on type
   const getBgColor = () => {
-    return type === 'upload' ? 'bg-blue-600' : 'bg-green-600';
+    return type === 'upload' ? 'bg-blue-600' : 'bg-blue-500';
   };
   
   const getLightBgColor = () => {
-    return type === 'upload' ? 'bg-blue-100' : 'bg-green-100';
+    return type === 'upload' ? 'bg-blue-900' : 'bg-blue-900';
   };
   
   const getBorderColor = () => {
-    return type === 'upload' ? 'border-blue-200' : 'border-green-200';
+    return type === 'upload' ? 'border-blue-800' : 'border-blue-800';
   };
   
   const getTextColor = () => {
-    return type === 'upload' ? 'text-blue-700' : 'text-green-700';
+    return type === 'upload' ? 'text-blue-300' : 'text-blue-300';
   };
 
   return (
@@ -47,7 +47,7 @@ const ProgressBar: React.FC<ProgressBarProps> = ({ progress, type }) => {
         <div className={`text-sm font-medium ${getTextColor()}`}>{getStage()}</div>
         <div className={`text-sm font-medium ${getTextColor()}`}>{Math.round(progress)}%</div>
       </div>
-      <div className="relative w-full h-2.5 bg-gray-200 rounded-full overflow-hidden">
+      <div className="relative w-full h-2.5 bg-gray-700 rounded-full overflow-hidden">
         {/* Background pulse animation when in progress */}
         <div 
           className={`absolute inset-0 ${getBgColor()} opacity-30`}
@@ -115,16 +115,16 @@ interface StageProps {
 const Stage: React.FC<StageProps> = ({ title, isActive, isComplete, type }) => {
   const getGradient = () => {
     return type === 'upload' 
-      ? 'bg-gradient-to-r from-blue-500 to-blue-600' 
-      : 'bg-gradient-to-r from-green-500 to-green-600';
+      ? 'bg-gradient-to-r from-blue-600 to-blue-700' 
+      : 'bg-gradient-to-r from-blue-500 to-blue-600';
   };
   
   const getAnimationColor = () => {
-    return type === 'upload' ? 'bg-blue-600' : 'bg-green-600';
+    return type === 'upload' ? 'bg-blue-600' : 'bg-blue-500';
   };
   
   const getTextColor = () => {
-    return type === 'upload' ? 'text-blue-600' : 'text-green-600';
+    return type === 'upload' ? 'text-blue-400' : 'text-blue-400';
   };
 
   return (
@@ -132,7 +132,7 @@ const Stage: React.FC<StageProps> = ({ title, isActive, isComplete, type }) => {
       <div 
         className={`w-8 h-8 rounded-full flex items-center justify-center mb-1 transition-colors
           ${isComplete ? getGradient() + ' text-white' : 
-            isActive ? getAnimationColor() + ' text-white animate-pulse' : 'bg-gray-200 text-gray-500'}`}
+            isActive ? getAnimationColor() + ' text-white animate-pulse' : 'bg-gray-700 text-gray-500'}`}
       >
         {isComplete ? (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
