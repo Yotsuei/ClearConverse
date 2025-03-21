@@ -12,7 +12,7 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
   const [recordingBlob, setRecordingBlob] = useState<Blob | null>(null);
   const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
   const [permission, setPermission] = useState<boolean | null>(null);
-  const [visualizerData, setVisualizerData] = useState<number[]>(Array(50).fill(0));
+  const [visualizerData, setVisualizerData] = useState<number[]>(Array(50).fill(2)); // Initialize with minimal height
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -33,7 +33,6 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
         const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
         const analyser = audioContext.createAnalyser();
         analyser.fftSize = 256;
-        const dataArray = new Uint8Array(analyser.frequencyBinCount);
         
         const source = audioContext.createMediaStreamSource(stream);
         source.connect(analyser);
@@ -71,9 +70,22 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
     analyser.getByteFrequencyData(dataArray);
     
     // Convert the data to a simpler array for visualization
-    const normalizedData = Array.from(dataArray)
-      .slice(0, 50)  // Use only a portion of the frequency data
-      .map(value => value / 255);  // Normalize to 0-1
+    // Take the full range of data and sample it to our 50 bars
+    const bars = 50;
+    const normalizedData = Array(bars).fill(0);
+    
+    // Calculate the average of frequency ranges for each bar
+    const binSize = Math.floor(dataArray.length / bars) || 1;
+    
+    for (let i = 0; i < bars; i++) {
+      let sum = 0;
+      const startBin = i * binSize;
+      for (let j = 0; j < binSize && startBin + j < dataArray.length; j++) {
+        sum += dataArray[startBin + j];
+      }
+      // Normalize to 0-1 and ensure a minimum height
+      normalizedData[i] = Math.max(2, (sum / binSize) / 255 * 100);
+    }
     
     setVisualizerData(normalizedData);
     
@@ -158,7 +170,7 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
                 key={index}
                 className={`w-1 mx-px ${isRecording ? 'bg-red-500' : 'bg-blue-500'} rounded-t transition-all duration-75`} 
                 style={{ 
-                  height: `${Math.max(4, value * 100)}%`,
+                  height: `${value}%`,
                   opacity: isRecording ? 1 : 0.5
                 }}
               ></div>

@@ -6,7 +6,6 @@ import AudioPlayer from './components/AudioPlayer';
 import TranscriptionDisplay from './components/TranscriptionDisplay';
 import { Tab } from './components/Tab';
 import MainMenu from './components/MainMenu';
-import UrlUpload from './components/UrlUpload';
 import ProgressBar from './components/ProgressBar';
 import ResetButton from './components/ResetButton';
 import './index.css';
@@ -16,7 +15,7 @@ type AudioSource = {
   url: string | null;
 };
 
-type Module = 'upload' | 'record' | 'url';
+type Module = 'upload' | 'record';
 
 const App: React.FC = () => {
   const [showMainMenu, setShowMainMenu] = useState<boolean>(true);
@@ -219,15 +218,6 @@ const App: React.FC = () => {
               icon="📁"
             />
             <Tab 
-              active={activeModule === 'url'} 
-              onClick={() => {
-                setActiveModule('url');
-                resetState();
-              }}
-              label="Google Drive"
-              icon="🔗"
-            />
-            <Tab 
               active={activeModule === 'record'} 
               onClick={() => {
                 setActiveModule('record');
@@ -242,18 +232,6 @@ const App: React.FC = () => {
           <div className="bg-gray-750 rounded-lg p-6 mb-6 border border-gray-700">
             {activeModule === 'upload' && (
               <FileUpload 
-                onFileSelected={handleFileSelected}
-                onUploadResponse={handleUploadResponse}
-                setIsUploading={setIsUploading}
-                setUploadProgress={setUploadProgress}
-                setIsProcessing={setIsProcessing}
-                startProcessing={startProcessingSimulation}
-                clearTranscription={clearTranscription}
-              />
-            )}
-            
-            {activeModule === 'url' && (
-              <UrlUpload
                 onFileSelected={handleFileSelected}
                 onUploadResponse={handleUploadResponse}
                 setIsUploading={setIsUploading}
