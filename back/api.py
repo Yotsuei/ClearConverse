@@ -50,35 +50,35 @@ class Config:
     auth_token: str
     target_sample_rate: int = 16000
     # Increase minimum segment duration to ensure segments are long enough for reliable embedding extraction.
-    min_segment_duration: float = 0.4  
+    min_segment_duration: float = 0.75  
     # Slightly higher threshold to detect overlaps (adjust based on audio characteristics).
-    overlap_threshold: float = 0.5  
+    overlap_threshold: float = 0.65  
     condition_on_previous_text: bool = True
     # Tighten gap threshold to avoid merging distinct speaker turns.
-    merge_gap_threshold: float = 0.75  
+    merge_gap_threshold: float = 0.5  
     # Increase the minimum duration for overlap separation.
-    min_overlap_duration_for_separation: float = 0.4  
+    min_overlap_duration_for_separation: float = 0.6  
     # Use more segments for a more robust speaker embedding average.
     max_embedding_segments: int = 100  
     enhance_separated_audio: bool = True
     use_vad_refinement: bool = True
     # Adjust the speaker embedding threshold if needed for more sensitive matching.
-    speaker_embedding_threshold: float = 0.50  
+    speaker_embedding_threshold: float = 0.45  
     # Increase noise reduction to help cleaner input for diarization and embedding.
-    noise_reduction_amount: float = 0.85  
+    noise_reduction_amount: float = 0.65  
     transcription_batch_size: int = 8
     use_speaker_embeddings: bool = True
-    temperature: float = 0.0
+    temperature: float = 0.1
     max_speakers: int = 2
     min_speakers: int = 1
     whisper_model_size: str = "small.en"
     transcribe_overlaps_individually: bool = True
     # Increase window size for overlap segmentation to capture more context.
-    sliding_window_size: float = 0.8  
+    sliding_window_size: float = 1.0  
     # Use a finer step to get smoother segmentation in overlaps.
-    sliding_window_step: float = 0.4  
+    sliding_window_step: float = 0.5  
     # Increase the secondary diarization threshold to catch more misclassifications.
-    secondary_diarization_threshold: float = 0.40
+    secondary_diarization_threshold: float = 0.35
 
 def merge_diarization_segments(segments: List[Tuple[float, float, str]], gap_threshold: float) -> List[Tuple[float, float, str]]:
     if not segments:
@@ -429,7 +429,7 @@ class EnhancedAudioProcessor:
                                 sub_audio = self._extract_segment(audio_segment, new_start - seg_start, new_end - seg_start)
                                 transcription = self.whisper_model.transcribe(
                                     sub_audio.squeeze().cpu().numpy(),
-                                    initial_prompt="This is a conversation between two people.",
+                                    initial_prompt="This is a clear conversation with complete sentences.",
                                     word_timestamps=True,
                                     condition_on_previous_text=self.config.condition_on_previous_text,
                                     temperature=self.config.temperature
