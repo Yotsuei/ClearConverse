@@ -4,6 +4,7 @@ import json
 import shutil
 import logging
 import traceback
+import time
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -153,46 +154,57 @@ class EnhancedAudioProcessor:
 
     def _initialize_models(self):
         logging.info(f"Initializing models on {self.device}...")
-        self.separator = SepformerSeparation.from_hparams(
-            source="speechbrain/resepformer-wsj02mix",
-            savedir="models/tmpdir_resepformer",
-            run_opts={"device": self.device}
-        )
-        self.whisper_model = whisper.load_model(self.config.whisper_model_size).to(self.device)
-        self.diarization = Pipeline.from_pretrained(
-            "pyannote/speaker-diarization-3.1",
-            use_auth_token=self.config.auth_token
-        ).to(self.device)
-        self.vad_pipeline = Pipeline.from_pretrained(
-            "pyannote/voice-activity-detection",
-            use_auth_token=self.config.auth_token
-        ).to(self.device)
-        self.embedding_model = Inference(
-            "pyannote/embedding", window="whole", use_auth_token=self.config.auth_token
-        ).to(self.device)
-        logging.info("Models initialized successfully!")
+        try:
+            self.separator = SepformerSeparation.from_hparams(
+                source="speechbrain/resepformer-wsj02mix",
+                savedir="models/tmpdir_resepformer",
+                run_opts={"device": self.device}
+            )
+            self.whisper_model = whisper.load_model(self.config.whisper_model_size).to(self.device)
+            self.diarization = Pipeline.from_pretrained(
+                "pyannote/speaker-diarization-3.1",
+                use_auth_token=self.config.auth_token
+            ).to(self.device)
+            self.vad_pipeline = Pipeline.from_pretrained(
+                "pyannote/voice-activity-detection",
+                use_auth_token=self.config.auth_token
+            ).to(self.device)
+            self.embedding_model = Inference(
+                "pyannote/embedding", window="whole", use_auth_token=self.config.auth_token
+            ).to(self.device)
+            logging.info("Models initialized successfully!")
+        except Exception as e:
+            logging.error(f"Error initializing models: {e}")
+            raise
 
     def load_audio(self, file_path: str) -> Tuple[torch.Tensor, int]:
-        logging.info(f"Loading audio from {file_path}")
-        signal, sample_rate = torchaudio.load(file_path)
-        signal = signal.to(self.device)
-        if signal.shape[0] > 1:
-            signal = torch.mean(signal, dim=0, keepdim=True)
-        if sample_rate != self.config.target_sample_rate:
-            if self.resampler is None or self.resampler.orig_freq != sample_rate:
-                self.resampler = torchaudio.transforms.Resample(
-                    orig_freq=sample_rate,
-                    new_freq=self.config.target_sample_rate
-                ).to(self.device)
-            signal = self.resampler(signal)
-        signal_np = signal.cpu().squeeze().numpy()
-        signal_np = nr.reduce_noise(y=signal_np, sr=self.config.target_sample_rate,
-                                    stationary=True, prop_decrease=self.config.noise_reduction_amount)
-        signal_np = signal_np / (np.max(np.abs(signal_np)) + 1e-8)
-        signal = torch.tensor(signal_np, device=self.device).unsqueeze(0)
-        duration = signal.shape[-1] / self.config.target_sample_rate
-        logging.info(f"Audio loaded: {duration:.2f}s at {self.config.target_sample_rate}Hz")
-        return signal, self.config.target_sample_rate
+        try:
+            logging.info(f"Loading audio from {file_path}")
+            signal, sample_rate = torchaudio.load(file_path)
+            signal = signal.to(self.device)
+            if signal.shape[0] > 1:
+                signal = torch.mean(signal, dim=0, keepdim=True)
+            if sample_rate != self.config.target_sample_rate:
+                if self.resampler is None or self.resampler.orig_freq != sample_rate:
+                    self.resampler = torchaudio.transforms.Resample(
+                        orig_freq=sample_rate,
+                        new_freq=self.config.target_sample_rate
+                    ).to(self.device)
+                signal = self.resampler(signal)
+            signal_np = signal.cpu().squeeze().numpy()
+            signal_np = nr.reduce_noise(y=signal_np, sr=self.config.target_sample_rate,
+                                        stationary=True, prop_decrease=self.config.noise_reduction_amount)
+            signal_np = signal_np / (np.max(np.abs(signal_np)) + 1e-8)
+            signal = torch.tensor(signal_np, device=self.device).unsqueeze(0)
+            duration = signal.shape[-1] / self.config.target_sample_rate
+            logging.info(f"Audio loaded: {duration:.2f}s at {self.config.target_sample_rate}Hz")
+            return signal, self.config.target_sample_rate
+        except FileNotFoundError:
+            logging.error(f"Audio file not found: {file_path}")
+            raise FileNotFoundError(f"Audio file not found: {file_path}")
+        except Exception as e:
+            logging.error(f"Error loading audio: {e}")
+            raise
 
     def _extract_segment(self, audio: torch.Tensor, start: float, end: float, sample_rate: Optional[int] = None) -> torch.Tensor:
         sr = sample_rate or self.config.target_sample_rate
@@ -343,14 +355,15 @@ class EnhancedAudioProcessor:
 
     def _secondary_diarization(self, audio_segment: torch.Tensor, seg_start: float, seg_end: float) -> List[Tuple[float, float, str]]:
         try:
-            temp_path = "temp_segment.wav"
+            temp_path = os.path.join(os.getcwd(), "temp_segment.wav")
             torchaudio.save(temp_path, audio_segment.cpu(), self.config.target_sample_rate)
             diarization_result = self.diarization(
                 temp_path,
                 min_speakers=1,
                 max_speakers=2
             )
-            os.remove(temp_path)
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
             new_segments = [(segment.start, segment.end, speaker)
                             for segment, _, speaker in diarization_result.itertracks(yield_label=True)]
             if not new_segments:
@@ -358,17 +371,29 @@ class EnhancedAudioProcessor:
             return merge_diarization_segments(new_segments, self.config.merge_gap_threshold)
         except Exception as e:
             logging.error(f"Secondary diarization failed: {e}")
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
             return [(seg_start, seg_end, "UNKNOWN")]
 
     def process_file(self, file_path: str) -> Dict:
         try:
+            # Validate file path
+            if not os.path.exists(file_path):
+                raise FileNotFoundError(f"The file does not exist: {file_path}")
+                
+            # Check if file is readable
+            if not os.access(file_path, os.R_OK):
+                raise PermissionError(f"The file is not readable: {file_path}")
+                
             audio, sample_rate = self.load_audio(file_path)
             audio_duration = audio.shape[-1] / sample_rate
             logging.info(f"Processing audio file: {audio_duration:.2f} seconds")
+            
             logging.info("Running Voice Activity Detection...")
             vad_result = self.vad_pipeline(file_path)
             vad_intervals = get_pyannote_vad_intervals(vad_result)
             logging.info(f"VAD detected {len(vad_intervals)} speech intervals")
+            
             logging.info("Running full-audio Speaker Diarization for profile building...")
             diarization_result = self.diarization(
                 file_path,
@@ -494,17 +519,27 @@ class EnhancedAudioProcessor:
                 'speakers': list(speaker_mapping.values())
             }
             return {'segments': processed_segments, 'metadata': metadata}
+        except FileNotFoundError as e:
+            logging.error(f"File not found error: {e}")
+            raise
+        except PermissionError as e:
+            logging.error(f"Permission error: {e}")
+            raise
         except Exception as e:
             logging.error(f"Error in process_file: {e}")
             traceback.print_exc()
             raise
 
     def save_segments(self, segments: List[AudioSegment], output_dir: str):
+        """Save processed audio segments to disk with proper directory creation."""
         output_dir = Path(output_dir)
         regular_dir = output_dir / "regular_segments"
         overlap_dir = output_dir / "overlap_segments"
+        
+        # Ensure directories exist
         regular_dir.mkdir(parents=True, exist_ok=True)
         overlap_dir.mkdir(parents=True, exist_ok=True)
+        
         for segment in segments:
             timestamp = f"{segment.start:.2f}-{segment.end:.2f}"
             if segment.is_overlap:
@@ -513,73 +548,126 @@ class EnhancedAudioProcessor:
             else:
                 filename = f"{timestamp}_{segment.speaker_id}.wav"
                 save_path = regular_dir / filename
-            torchaudio.save(str(save_path), segment.audio_tensor.cpu(), self.config.target_sample_rate)
-            logging.info(f"Saved segment: {save_path}")
+                
+            try:
+                torchaudio.save(str(save_path), segment.audio_tensor.cpu(), self.config.target_sample_rate)
+                logging.info(f"Saved segment: {save_path}")
+            except Exception as e:
+                logging.error(f"Error saving segment to {save_path}: {e}")
+                # Continue with other segments
 
     def save_debug_segments(self, segments: List[AudioSegment], output_dir: str):
+        """Save detailed debug information for segments with enhanced error handling."""
         debug_dir = Path(output_dir) / "debug_segments"
-        debug_dir.mkdir(parents=True, exist_ok=True)
-        metadata = []
-        for idx, segment in enumerate(segments):
-            segment_id = f"segment_{idx:03d}"
-            segment_type = "overlap" if segment.is_overlap else "regular"
-            segment_dir = debug_dir / segment_type
-            segment_dir.mkdir(exist_ok=True)
-            audio_filename = f"{segment_id}.wav"
-            torchaudio.save(str(segment_dir / audio_filename), segment.audio_tensor.cpu(), self.config.target_sample_rate)
-            segment_metadata = {
-                "segment_id": segment_id,
-                "start_time": f"{segment.start:.3f}",
-                "end_time": f"{segment.end:.3f}",
-                "duration": f"{segment.end - segment.start:.3f}",
-                "speaker_id": segment.speaker_id,
-                "is_overlap": segment.is_overlap,
-                "transcription": segment.transcription,
-                "audio_file": str(segment_dir / audio_filename),
-                "audio_stats": {
-                    "max_amplitude": float(torch.max(torch.abs(segment.audio_tensor)).cpu()),
-                    "mean_amplitude": float(torch.mean(torch.abs(segment.audio_tensor)).cpu()),
-                    "samples": segment.audio_tensor.shape[-1]
-                }
-            }
-            metadata.append(segment_metadata)
-            with open(segment_dir / f"{segment_id}_info.txt", "w") as f:
-                f.write(f"Segment ID: {segment_id}\n")
-                f.write(f"Time: {segment.start:.3f}s - {segment.end:.3f}s\n")
-                f.write(f"Speaker: {segment.speaker_id}\n")
-                f.write(f"Overlap: {segment.is_overlap}\n")
-                f.write(f"Transcription: {segment.transcription}\n")
-        with open(debug_dir / "segments_metadata.json", "w") as f:
-            json.dump(metadata, f, indent=2)
-        logging.info(f"Debug segments saved to: {debug_dir}")
-        logging.info(f"Total segments: {len(segments)}")
-        logging.info(f"Overlap segments: {sum(1 for s in segments if s.is_overlap)}")
-        logging.info(f"Regular segments: {sum(1 for s in segments if not s.is_overlap)}")
+        
+        try:
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            metadata = []
+            
+            for idx, segment in enumerate(segments):
+                segment_id = f"segment_{idx:03d}"
+                segment_type = "overlap" if segment.is_overlap else "regular"
+                segment_dir = debug_dir / segment_type
+                segment_dir.mkdir(exist_ok=True)
+                
+                audio_filename = f"{segment_id}.wav"
+                try:
+                    torchaudio.save(str(segment_dir / audio_filename), segment.audio_tensor.cpu(), self.config.target_sample_rate)
+                    
+                    segment_metadata = {
+                        "segment_id": segment_id,
+                        "start_time": f"{segment.start:.3f}",
+                        "end_time": f"{segment.end:.3f}",
+                        "duration": f"{segment.end - segment.start:.3f}",
+                        "speaker_id": segment.speaker_id,
+                        "is_overlap": segment.is_overlap,
+                        "transcription": segment.transcription,
+                        "audio_file": str(segment_dir / audio_filename),
+                        "audio_stats": {
+                            "max_amplitude": float(torch.max(torch.abs(segment.audio_tensor)).cpu()),
+                            "mean_amplitude": float(torch.mean(torch.abs(segment.audio_tensor)).cpu()),
+                            "samples": segment.audio_tensor.shape[-1]
+                        }
+                    }
+                    metadata.append(segment_metadata)
+                    
+                    with open(segment_dir / f"{segment_id}_info.txt", "w") as f:
+                        f.write(f"Segment ID: {segment_id}\n")
+                        f.write(f"Time: {segment.start:.3f}s - {segment.end:.3f}s\n")
+                        f.write(f"Speaker: {segment.speaker_id}\n")
+                        f.write(f"Overlap: {segment.is_overlap}\n")
+                        f.write(f"Transcription: {segment.transcription}\n")
+                except Exception as e:
+                    logging.error(f"Error saving debug segment {segment_id}: {e}")
+                    # Continue with other segments
+            
+            # Save the metadata file
+            with open(debug_dir / "segments_metadata.json", "w") as f:
+                json.dump(metadata, f, indent=2)
+                
+            logging.info(f"Debug segments saved to: {debug_dir}")
+            logging.info(f"Total segments: {len(segments)}")
+            logging.info(f"Overlap segments: {sum(1 for s in segments if s.is_overlap)}")
+            logging.info(f"Regular segments: {sum(1 for s in segments if not s.is_overlap)}")
+        except Exception as e:
+            logging.error(f"Error in save_debug_segments: {e}")
+            raise
 
     def run(self, input_file, output_dir: str = "processed_audio", debug_mode: bool = False):
+        """Run the entire processing pipeline with enhanced error handling."""
         try:
+            # Validate input file exists
+            if not os.path.exists(input_file):
+                raise FileNotFoundError(f"Input file not found: {input_file}")
+                
+            # Create a stable base filename that's safe for filesystem use
             base_filename = os.path.splitext(os.path.basename(input_file))[0]
+            # Replace characters that might cause issues
+            base_filename = "".join(c if c.isalnum() or c in "_- " else "_" for c in base_filename)
+            
+            # Ensure output directory is an absolute path
+            if not os.path.isabs(output_dir):
+                output_dir = os.path.join(os.getcwd(), output_dir)
+                
             file_output_dir = os.path.join(output_dir, base_filename)
+            
+            # Create directory with proper permissions
             os.makedirs(file_output_dir, exist_ok=True)
+            
             logging.info(f"Processing file: {input_file}")
+            logging.info(f"Output directory: {file_output_dir}")
+            
             results = self.process_file(input_file)
             self.save_segments(results['segments'], file_output_dir)
+            
             if debug_mode:
                 self.save_debug_segments(results['segments'], file_output_dir)
+                
             logging.info("Processing completed!")
             logging.info(f"Total duration: {results['metadata']['duration']:.2f} seconds")
             logging.info(f"Speaker A segments: {results['metadata']['speaker_a_segments']}")
             logging.info(f"Speaker B segments: {results['metadata']['speaker_b_segments']}")
             logging.info(f"Total segments: {results['metadata']['total_segments']}")
+            
+            # Create and save transcript
             transcript_path = os.path.join(file_output_dir, "transcript.txt")
             transcript = ""
             for segment in results['segments']:
                 transcript += f"[{segment.speaker_id}] {segment.start:.2f}s - {segment.end:.2f}s\n"
                 transcript += f"{segment.transcription}\n\n"
+                
             with open(transcript_path, "w", encoding='utf-8') as f:
                 f.write(transcript)
+                
             logging.info(f"Transcript saved to: {transcript_path}")
             return input_file, transcript, transcript_path
+            
+        except FileNotFoundError as e:
+            logging.error(f"File not found: {e}")
+            raise
+        except PermissionError as e:
+            logging.error(f"Permission error: {e}")
+            raise
         except Exception as e:
             logging.error(f"Error during processing: {e}")
             traceback.print_exc()
@@ -594,7 +682,7 @@ app = FastAPI(
     description="API to process audio files (MP3/WAV) and return a formatted transcript. The transcript can also be downloaded as a TXT file."
 )
 
-# Allow CORS if needed
+# Allow CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -603,47 +691,169 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Create a directory for processed outputs if not exists
+# Create directories for processed outputs and temporary uploads
 OUTPUT_DIR = "processed_audio"
+TEMP_DIR = "temp_uploads"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(TEMP_DIR, exist_ok=True)
 
-
-load_dotenv()  # this loads variables from .env into the environment
+# Load environment variables and initialize processor
+load_dotenv()
 AUTH_TOKEN = os.getenv("HF_AUTH_TOKEN")
-config = Config(auth_token=AUTH_TOKEN)
-processor = EnhancedAudioProcessor(config)
+if not AUTH_TOKEN:
+    logging.warning("HF_AUTH_TOKEN not found in environment variables. Using empty string.")
+    AUTH_TOKEN = ""  # Provide a default value to prevent errors
+
+try:
+    config = Config(auth_token=AUTH_TOKEN)
+    processor = EnhancedAudioProcessor(config)
+    logging.info("Audio processor initialized successfully")
+except Exception as e:
+    logging.error(f"Failed to initialize audio processor: {e}")
+    # The app will still start, but processing will fail until fixed
 
 @app.post("/transcribe", summary="Upload an audio file and get the transcript")
 async def transcribe_audio(file: UploadFile = File(...)):
-    if not file.filename.endswith((".mp3", ".wav")):
-        raise HTTPException(status_code=400, detail="Invalid file type. Only MP3 and WAV files are accepted.")
+    """
+    Process an uploaded audio file and return the transcript.
+    Accepts .mp3 and .wav files.
+    """
+    
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename provided")
+        
+    # Sanitize the filename to prevent path traversal attacks
+    safe_filename = os.path.basename(file.filename)
+    
+    # Validate file extension
+    if not safe_filename.lower().endswith((".mp3", ".wav")):
+        raise HTTPException(
+            status_code=400, 
+            detail="Invalid file type. Only MP3 and WAV files are accepted."
+        )
+    
+    # Generate a unique filename to prevent collisions
+    timestamp = int(time.time())
+    unique_filename = f"{timestamp}_{safe_filename}"
+    temp_file_path = os.path.join(TEMP_DIR, unique_filename)
+    
     try:
-        temp_dir = Path("temp_uploads")
-        temp_dir.mkdir(exist_ok=True)
-        temp_file_path = temp_dir / file.filename
-        with open(temp_file_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
-        audio_path, transcript, transcript_file_path = processor.run(str(temp_file_path), debug_mode=False)
-        os.remove(temp_file_path)
-        # Compute relative path from OUTPUT_DIR so that the nested folder is preserved
-        rel_path = Path(transcript_file_path).relative_to(Path(OUTPUT_DIR))
-        download_url = f"/download/{rel_path}"
-        return JSONResponse(content={"audio_file": audio_path, "transcript": transcript, "download_url": download_url})
+        # Save the uploaded file
+        try:
+            with open(temp_file_path, "wb") as f:
+                content = await file.read()
+                if not content:
+                    raise HTTPException(status_code=400, detail="Empty file uploaded")
+                f.write(content)
+        except IOError as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to save uploaded file: {str(e)}"
+            )
+        
+        # Process the audio file
+        try:
+            audio_path, transcript, transcript_file_path = processor.run(
+                str(temp_file_path), 
+                output_dir=OUTPUT_DIR,
+                debug_mode=False
+            )
+        except FileNotFoundError:
+            raise HTTPException(
+                status_code=404,
+                detail="The audio file was not found or could not be processed"
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error processing audio: {str(e)}"
+            )
+            
+        # Clean up the temporary file
+        try:
+            if os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
+        except Exception as e:
+            logging.error(f"Failed to remove temporary file {temp_file_path}: {e}")
+        
+        # Compute relative path from OUTPUT_DIR for the download URL
+        try:
+            rel_path = os.path.relpath(transcript_file_path, OUTPUT_DIR)
+            download_url = f"/download/{rel_path}"
+        except Exception as e:
+            logging.error(f"Error computing relative path: {e}")
+            # Fallback to filename only if relpath fails
+            download_url = f"/download/{os.path.basename(transcript_file_path)}"
+        
+        return JSONResponse(content={
+            "audio_file": audio_path,
+            "transcript": transcript,
+            "download_url": download_url
+        })
+    
+    except HTTPException:
+        # Re-raise HTTP exceptions to preserve their status codes
+        raise
     except Exception as e:
-        logging.error(f"Error in /transcribe endpoint: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logging.error(f"Unhandled error in /transcribe endpoint: {e}")
+        traceback.print_exc()
+        
+        # Cleanup in case of error
+        if os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+            except:
+                pass
+                
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
 
 @app.get("/download/{file_path:path}", summary="Download the transcript TXT file")
 async def download_transcript(file_path: str):
-    transcript_path = Path(OUTPUT_DIR) / file_path
+    """
+    Download a transcript file by path.
+    The file_path is relative to the OUTPUT_DIR.
+    """
+    # Sanitize the file path to prevent directory traversal
+    safe_path = Path(file_path).name
+    for part in Path(file_path).parts:
+        if part != ".." and part != "." and part != "/":
+            if part != safe_path:  # Skip the filename which we already added
+                safe_path = os.path.join(part, safe_path)
+    
+    transcript_path = Path(OUTPUT_DIR) / safe_path
+    
     if not transcript_path.exists():
-        raise HTTPException(status_code=404, detail="Transcript file not found.")
-    return FileResponse(path=str(transcript_path), media_type="text/plain", filename=transcript_path.name)
+        raise HTTPException(
+            status_code=404, 
+            detail="Transcript file not found."
+        )
+    
+    # Check if file is readable
+    if not os.access(transcript_path, os.R_OK):
+        raise HTTPException(
+            status_code=403, 
+            detail="Permission denied: Cannot read transcript file"
+        )
+    
+    # Return the file as a download
+    return FileResponse(
+        path=str(transcript_path), 
+        media_type="text/plain", 
+        filename=transcript_path.name
+    )
+
+@app.get("/health", summary="API Health Check")
+async def health_check():
+    """Check if the API is running and models are loaded."""
+    return {"status": "ok", "version": "1.0.0"}
 
 # =============================================================================
 # Main entry point
 # =============================================================================
 
 if __name__ == "__main__":
+    import time  # Import here to avoid circular import issue
     uvicorn.run(app, host="0.0.0.0", port=8000)

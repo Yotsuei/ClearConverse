@@ -17,9 +17,25 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ audioUrl, onTranscribe }) => 
     // Reset audio player when URL changes
     setIsPlaying(false);
     setCurrentTime(0);
+    
+    // Create a new Audio element to properly load and get metadata
+    const audioElement = new Audio(audioUrl);
+    audioElement.addEventListener('loadedmetadata', () => {
+      if (audioRef.current) {
+        audioRef.current.load(); // Reload the audio element
+      }
+    });
+    
+    // Cleanup
+    return () => {
+      audioElement.remove();
+    };
   }, [audioUrl]);
 
   const formatTime = (seconds: number): string => {
+    if (isNaN(seconds) || !isFinite(seconds)) {
+      return "0:00";
+    }
     const minutes = Math.floor(seconds / 60);
     const remainingSeconds = Math.floor(seconds % 60);
     return `${minutes}:${remainingSeconds < 10 ? '0' : ''}${remainingSeconds}`;
@@ -61,7 +77,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ audioUrl, onTranscribe }) => 
   };
 
   const handleProgressBarClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (progressBarRef.current && audioRef.current) {
+    if (progressBarRef.current && audioRef.current && duration > 0) {
       const rect = progressBarRef.current.getBoundingClientRect();
       const pos = (e.clientX - rect.left) / rect.width;
       audioRef.current.currentTime = pos * duration;
@@ -86,6 +102,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ audioUrl, onTranscribe }) => 
         onLoadedMetadata={handleLoadedMetadata}
         onEnded={handleAudioEnded}
         className="hidden"
+        preload="metadata"
       />
 
       {/* Time display above progress bar */}
@@ -102,7 +119,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ audioUrl, onTranscribe }) => 
       >
         <div 
           className="h-2 bg-blue-600 rounded-full"
-          style={{ width: `${(currentTime / duration) * 100 || 0}%` }}
+          style={{ width: `${((currentTime / duration) * 100) || 0}%` }}
         ></div>
       </div>
 

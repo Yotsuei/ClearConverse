@@ -12,7 +12,8 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
   const [recordingBlob, setRecordingBlob] = useState<Blob | null>(null);
   const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
   const [permission, setPermission] = useState<boolean | null>(null);
-  const [visualizerData, setVisualizerData] = useState<number[]>(Array(50).fill(0));
+  const [visualizerData, setVisualizerData] = useState<number[]>(Array(50).fill(2)); // Initialize with minimal height
+  const [error, setError] = useState<string | null>(null); // Add error state
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -28,12 +29,12 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         setAudioStream(stream);
         setPermission(true);
+        setError(null); // Clear any previous errors
         
         // Set up audio context and analyzer for visualization
         const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
         const analyser = audioContext.createAnalyser();
         analyser.fftSize = 256;
-        const dataArray = new Uint8Array(analyser.frequencyBinCount);
         
         const source = audioContext.createMediaStreamSource(stream);
         source.connect(analyser);
@@ -43,6 +44,14 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
       } catch (err) {
         console.error('Error accessing microphone:', err);
         setPermission(false);
+        // Display specific error based on the type of error
+        if ((err as Error).name === 'NotAllowedError') {
+          setError('Microphone access was denied. Please allow microphone access in your browser settings.');
+        } else if ((err as Error).name === 'NotFoundError') {
+          setError('No microphone detected. Please connect a microphone and try again.');
+        } else {
+          setError(`Microphone error: ${(err as Error).message || 'Unknown error occurred'}`);
+        }
       }
     };
 
@@ -71,9 +80,22 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
     analyser.getByteFrequencyData(dataArray);
     
     // Convert the data to a simpler array for visualization
-    const normalizedData = Array.from(dataArray)
-      .slice(0, 50)  // Use only a portion of the frequency data
-      .map(value => value / 255);  // Normalize to 0-1
+    // Take the full range of data and sample it to our 50 bars
+    const bars = 50;
+    const normalizedData = Array(bars).fill(0);
+    
+    // Calculate the average of frequency ranges for each bar
+    const binSize = Math.floor(dataArray.length / bars) || 1;
+    
+    for (let i = 0; i < bars; i++) {
+      let sum = 0;
+      const startBin = i * binSize;
+      for (let j = 0; j < binSize && startBin + j < dataArray.length; j++) {
+        sum += dataArray[startBin + j];
+      }
+      // Normalize to 0-1 and ensure a minimum height
+      normalizedData[i] = Math.max(2, (sum / binSize) / 255 * 100);
+    }
     
     setVisualizerData(normalizedData);
     
@@ -81,40 +103,67 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
   };
 
   const startRecording = () => {
-    if (!audioStream) return;
+    if (!audioStream) {
+      setError("No audio stream available. Please refresh and try again.");
+      return;
+    }
 
     audioChunksRef.current = [];
-    const mediaRecorder = new MediaRecorder(audioStream);
-    
-    mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0) {
-        audioChunksRef.current.push(event.data);
-      }
-    };
-    
-    mediaRecorder.onstop = () => {
-      const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
-      setRecordingBlob(audioBlob);
-      onRecordingComplete(audioBlob);
-    };
-    
-    mediaRecorderRef.current = mediaRecorder;
-    mediaRecorder.start();
-    setIsRecording(true);
-    setRecordingTime(0);
-    
-    // Start timer
-    timerRef.current = setInterval(() => {
-      setRecordingTime(prev => prev + 1);
-    }, 1000);
-    
-    // Start visualizer
-    updateVisualizer();
+    try {
+      const mediaRecorder = new MediaRecorder(audioStream);
+      
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+      
+      mediaRecorder.onstop = () => {
+        try {
+          if (audioChunksRef.current.length === 0) {
+            throw new Error("No audio data recorded");
+          }
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+          setRecordingBlob(audioBlob);
+          onRecordingComplete(audioBlob);
+          setError(null); // Clear any errors on successful recording
+        } catch (err) {
+          console.error("Error finalizing recording:", err);
+          setError(`Recording error: ${(err as Error).message || "Failed to process recording"}`);
+        }
+      };
+
+      mediaRecorder.onerror = (event) => {
+        setError(`Recording error: ${(event as any).error?.message || "Unknown error occurred"}`);
+        stopRecording();
+      };
+      
+      mediaRecorderRef.current = mediaRecorder;
+      mediaRecorder.start();
+      setIsRecording(true);
+      setRecordingTime(0);
+      
+      // Start timer
+      timerRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+      
+      // Start visualizer
+      updateVisualizer();
+    } catch (err) {
+      console.error("Error starting recording:", err);
+      setError(`Couldn't start recording: ${(err as Error).message || "Unknown error"}`);
+    }
   };
 
   const stopRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
+      try {
+        mediaRecorderRef.current.stop();
+      } catch (err) {
+        console.error("Error stopping recording:", err);
+        setError(`Error stopping recording: ${(err as Error).message}`);
+      }
       setIsRecording(false);
       
       // Clear timer
@@ -138,14 +187,86 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
   const resetRecording = () => {
     setRecordingBlob(null);
     setRecordingTime(0);
+    setError(null);
+  };
+
+  const retryMicrophoneAccess = () => {
+    // Reset states
+    setPermission(null);
+    setError(null);
+    
+    // Re-request microphone access
+    const getMicrophonePermission = async () => {
+      try {
+        // Close existing streams if any
+        if (audioStream) {
+          audioStream.getTracks().forEach(track => track.stop());
+        }
+        
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        setAudioStream(stream);
+        setPermission(true);
+        
+        // Set up audio context and analyzer for visualization
+        if (audioContextRef.current) {
+          await audioContextRef.current.close();
+        }
+        
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+        
+        const source = audioContext.createMediaStreamSource(stream);
+        source.connect(analyser);
+        
+        audioContextRef.current = audioContext;
+        analyserRef.current = analyser;
+      } catch (err) {
+        console.error('Error accessing microphone:', err);
+        setPermission(false);
+        setError(`Microphone error: ${(err as Error).message || 'Unknown error'}`);
+      }
+    };
+
+    getMicrophonePermission();
   };
 
   return (
     <div className="flex flex-col items-center">
-      {permission === false && (
+      <h2 className="text-xl font-bold text-gray-200 mb-4">Record Audio</h2>
+      <p className="text-gray-400 mb-6 text-center">
+        Record audio directly from your microphone and transcribe it instantly.
+      </p>
+      
+      {/* Error alert */}
+      {error && (
+        <div className="bg-red-900 text-red-200 p-4 rounded-lg mb-4 w-full border border-red-700">
+          <p className="font-medium flex items-center">
+            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+            </svg>
+            Recording Error
+          </p>
+          <p className="text-sm mt-1">{error}</p>
+          <button 
+            onClick={retryMicrophoneAccess}
+            className="mt-2 px-4 py-1 bg-red-800 hover:bg-red-700 text-red-100 rounded text-sm"
+          >
+            Retry Microphone Access
+          </button>
+        </div>
+      )}
+      
+      {permission === false && !error && (
         <div className="bg-red-900 text-red-200 p-4 rounded-lg mb-4 w-full border border-red-700">
           <p className="font-medium">Microphone access denied</p>
           <p className="text-sm">Please allow microphone access to use this feature.</p>
+          <button 
+            onClick={retryMicrophoneAccess}
+            className="mt-2 px-4 py-1 bg-red-800 hover:bg-red-700 text-red-100 rounded text-sm"
+          >
+            Retry Microphone Access
+          </button>
         </div>
       )}
       
@@ -158,7 +279,7 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
                 key={index}
                 className={`w-1 mx-px ${isRecording ? 'bg-red-500' : 'bg-blue-500'} rounded-t transition-all duration-75`} 
                 style={{ 
-                  height: `${Math.max(4, value * 100)}%`,
+                  height: `${value}%`,
                   opacity: isRecording ? 1 : 0.5
                 }}
               ></div>
@@ -221,6 +342,22 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
               </button>
             </div>
           )}
+          
+          {/* Recording tips */}
+          <div className="mt-6 bg-gray-700 p-4 rounded-lg text-sm border border-gray-600 w-full">
+            <h3 className="font-semibold text-gray-200 mb-2 flex items-center">
+              <svg className="w-5 h-5 mr-2 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+              Recording Tips
+            </h3>
+            <ul className="list-disc list-inside text-gray-300 space-y-1">
+              <li>Speak clearly and at a moderate pace</li>
+              <li>Minimize background noise for better results</li>
+              <li>Keep the microphone at a consistent distance</li>
+              <li>Recordings are saved as WAV files</li>
+            </ul>
+          </div>
         </>
       )}
     </div>
