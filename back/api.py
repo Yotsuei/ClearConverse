@@ -6,6 +6,7 @@ import logging
 import traceback
 import time
 import re
+import subprocess
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,6 +32,77 @@ from speechbrain.inference import SepformerSeparation
 # Logging setup
 # =============================================================================
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
+# =============================================================================
+# Audio Conversion Utility
+# =============================================================================
+
+def convert_audio_file(input_path, output_path, sample_rate=16000, channels=1):
+    """
+    Convert audio file using FFmpeg directly via subprocess.
+    This avoids any issues with ffmpeg-python package versions.
+    
+    Args:
+        input_path: Path to input audio file
+        output_path: Path to save converted audio file
+        sample_rate: Target sample rate (default: 16000)
+        channels: Target number of channels (default: 1 for mono)
+        
+    Returns:
+        bool: True if conversion was successful, False otherwise
+    """
+    # Check if FFmpeg is installed
+    try:
+        subprocess.run(['ffmpeg', '-version'], 
+                      stdout=subprocess.PIPE, 
+                      stderr=subprocess.PIPE,
+                      check=False)
+    except FileNotFoundError:
+        logging.error("FFmpeg not found in PATH")
+        return False
+    
+    # Build FFmpeg command
+    cmd = [
+        'ffmpeg',
+        '-i', input_path,           # Input file
+        '-acodec', 'pcm_s16le',     # Audio codec (WAV)
+        '-ar', str(sample_rate),    # Sample rate
+        '-ac', str(channels),       # Number of channels
+        '-y',                       # Overwrite output
+        output_path                 # Output file
+    ]
+    
+    try:
+        # Run the command
+        process = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False
+        )
+        
+        # Check if conversion was successful
+        if process.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            logging.info(f"Successfully converted {input_path} to {output_path}")
+            return True
+        else:
+            logging.error(f"FFmpeg conversion failed: {process.stderr}")
+            return False
+            
+    except Exception as e:
+        logging.error(f"Error during audio conversion: {str(e)}")
+        return False
+
+# Check if FFmpeg is available on the system
+def is_ffmpeg_installed():
+    try:
+        result = subprocess.run(['ffmpeg', '-version'], 
+                              stdout=subprocess.PIPE, 
+                              stderr=subprocess.PIPE)
+        return result.returncode == 0
+    except FileNotFoundError:
+        return False
 
 # =============================================================================
 # Data Classes and Utility Functions (Same as your pipeline)
@@ -772,67 +844,25 @@ async def transcribe_audio(file: UploadFile = File(...)):
             output_ext = '.wav'  # Default to WAV format
             converted_path = temp_file_path.rsplit('.', 1)[0] + output_ext
             
-            try:
-                # Check if ffmpeg is installed
-                import subprocess
-                try:
-                    subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True)
-                except (subprocess.SubprocessError, FileNotFoundError):
-                    raise ImportError("ffmpeg is not installed or not found in PATH")
-                
-                # Import ffmpeg-python
-                try:
-                    import ffmpeg
-                except ImportError:
-                    logging.error("ffmpeg-python package not installed")
-                    raise ImportError("ffmpeg-python package is required for audio conversion")
-                
-                # Log conversion details
-                logging.info(f"Converting {file_ext} to {output_ext}: {temp_file_path} -> {converted_path}")
-                
-                # Run the ffmpeg conversion with explicit error handling
-                try:
-                    (
-                        ffmpeg
-                        .input(temp_file_path)
-                        .output(converted_path, acodec='pcm_s16le', ar=16000, ac=1)
-                        .overwrite_output()
-                        .run(quiet=True, capture_stdout=True, capture_stderr=True)
-                    )
-                    
-                    # Verify the converted file exists and has content
-                    if os.path.exists(converted_path) and os.path.getsize(converted_path) > 0:
-                        conversion_successful = True
-                        input_path = converted_path
-                        logging.info(f"Conversion successful: {converted_path}")
-                    else:
-                        raise Exception("Converted file is empty or was not created")
-                        
-                except ffmpeg.Error as e:
-                    # Get detailed error from ffmpeg
-                    stderr = e.stderr.decode() if hasattr(e, 'stderr') else str(e)
-                    logging.error(f"FFmpeg conversion error: {stderr}")
-                    raise Exception(f"FFmpeg conversion failed: {stderr}")
-                
-            except ImportError as e:
-                logging.error(f"Dependency error: {e}")
+            # Check if FFmpeg is available
+            if not is_ffmpeg_installed():
                 raise HTTPException(
                     status_code=500,
-                    detail=f"Server is missing required dependencies for conversion: {str(e)}"
+                    detail="Server is missing required dependencies for conversion: ffmpeg is not installed or not found in PATH"
                 )
-            except Exception as e:
-                logging.error(f"Conversion error: {e}")
+            
+            # Perform conversion using the direct subprocess method
+            logging.info(f"Converting {file_ext} to {output_ext}: {temp_file_path} -> {converted_path}")
+            conversion_successful = convert_audio_file(temp_file_path, converted_path)
+            
+            if conversion_successful:
+                input_path = converted_path
+                logging.info(f"Conversion successful: {converted_path}")
+            else:
                 raise HTTPException(
                     status_code=500,
-                    detail=f"Error converting audio file: {str(e)}"
+                    detail="Failed to convert the audio file to a supported format"
                 )
-        
-        # If conversion is needed but failed, raise an error
-        if needs_conversion and not conversion_successful:
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to convert the audio file to a supported format"
-            )
         
         # Process the audio file (now using the potentially converted file)
         try:
@@ -974,7 +1004,15 @@ async def download_transcript(file_path: str):
 @app.get("/health", summary="API Health Check")
 async def health_check():
     """Check if the API is running and models are loaded."""
-    return {"status": "ok", "version": "1.0.0"}
+    # Check if FFmpeg is installed
+    ffmpeg_status = "available" if is_ffmpeg_installed() else "not available"
+    
+    return {
+        "status": "ok", 
+        "version": "1.0.0",
+        "ffmpeg": ffmpeg_status,
+        "torch_device": str(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+    }
 
 # =============================================================================
 # Main entry point
