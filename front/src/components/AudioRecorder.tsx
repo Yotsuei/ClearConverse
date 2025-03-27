@@ -59,14 +59,35 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
 
     // Cleanup
     return () => {
+      // Stop and clean up MediaRecorder
+      if (mediaRecorderRef.current && isRecording) {
+        try {
+          mediaRecorderRef.current.stop();
+        } catch (err) {
+          console.error("Error stopping MediaRecorder during cleanup:", err);
+        }
+      }
+      
+      // Clean up audio stream
       if (audioStream) {
         audioStream.getTracks().forEach(track => track.stop());
       }
+      
+      // Cancel animation frame if active
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
+      
+      // Clear timer if active
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+      
+      // Close audio context if open
       if (audioContextRef.current) {
-        audioContextRef.current.close();
+        audioContextRef.current.close().catch(err => {
+          console.error("Error closing AudioContext:", err);
+        });
       }
     };
   }, []);
@@ -79,22 +100,26 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
     analyser.getByteFrequencyData(dataArray);
     
-    // Convert the data to a simpler array for visualization
-    // Take the full range of data and sample it to our 50 bars
-    const bars = 50;
+    // Get the useful frequency range and distribute it across the full visualizer width
+    // Use the full frequency range instead of just the first half
+    const bars = 50; // Number of visualizer bars
     const normalizedData = Array(bars).fill(0);
     
-    // Calculate the average of frequency ranges for each bar
-    const binSize = Math.floor(dataArray.length / bars) || 1;
+    // Use the full data range by sampling across the entire spectrum
+    // This ensures we use the full width of the visualizer
+    const usableDataLength = dataArray.length * 0.9; // Use 90% of the frequency data to avoid ultra-high frequencies
+    const binSize = Math.floor(usableDataLength / bars) || 1;
     
     for (let i = 0; i < bars; i++) {
       let sum = 0;
-      const startBin = i * binSize;
+      // Calculate sampling position to distribute across full spectrum
+      const startBin = Math.floor((i / bars) * usableDataLength);
       for (let j = 0; j < binSize && startBin + j < dataArray.length; j++) {
         sum += dataArray[startBin + j];
       }
       // Normalize to 0-1 and ensure a minimum height
-      normalizedData[i] = Math.max(2, (sum / binSize) / 255 * 100);
+      // Increase the scale factor to make bars more visible
+      normalizedData[i] = Math.max(2, (sum / binSize) / 255 * 120);
     }
     
     setVisualizerData(normalizedData);
@@ -225,11 +250,13 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
       // Clear timer
       if (timerRef.current) {
         clearInterval(timerRef.current);
+        timerRef.current = null;
       }
       
       // Stop visualizer
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
       }
     }
   };
@@ -257,6 +284,15 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
         // Close existing streams if any
         if (audioStream) {
           audioStream.getTracks().forEach(track => track.stop());
+        }
+        
+        // Stop MediaRecorder if it's running
+        if (mediaRecorderRef.current && isRecording) {
+          try {
+            mediaRecorderRef.current.stop();
+          } catch (err) {
+            console.error("Error stopping MediaRecorder during retry:", err);
+          }
         }
         
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -329,14 +365,16 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
       {permission && (
         <>
           {/* Audio Visualizer */}
-          <div className="w-full h-20 mb-6 bg-gray-800 rounded-lg overflow-hidden flex items-end border border-gray-700">
+          <div className="w-full h-20 mb-6 bg-gray-800 rounded-lg overflow-hidden flex items-end justify-between border border-gray-700">
             {visualizerData.map((value, index) => (
               <div 
                 key={index}
                 className={`w-1 mx-px ${isRecording ? 'bg-red-500' : 'bg-blue-500'} rounded-t transition-all duration-75`} 
                 style={{ 
                   height: `${value}%`,
-                  opacity: isRecording ? 1 : 0.5
+                  opacity: isRecording ? 1 : 0.5,
+                  minWidth: '1.5%', // Ensure bars have minimum width to fill container
+                  flexGrow: 1     // Allow bars to grow to fill the space
                 }}
               ></div>
             ))}
