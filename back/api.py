@@ -727,7 +727,9 @@ async def transcribe_audio(file: UploadFile = File(...)):
     safe_filename = os.path.basename(file.filename)
     
     # Validate file extension
-    valid_extensions = [".mp3", ".wav", ".mp4", ".webm", ".ogg"]
+    primary_extensions = [".mp3", ".wav"]
+    secondary_extensions = [".mp4", ".webm", ".ogg"] 
+    valid_extensions = primary_extensions + secondary_extensions
     file_ext = os.path.splitext(safe_filename.lower())[1]
     
     if not any(safe_filename.lower().endswith(ext) for ext in valid_extensions):
@@ -735,6 +737,9 @@ async def transcribe_audio(file: UploadFile = File(...)):
             status_code=400, 
             detail="Invalid file type. Only MP3, WAV, MP4, WebM and OGG files are accepted."
         )
+    
+    # Log file details for debugging
+    logging.info(f"Processing file: {safe_filename} with type {file_ext}")
     
     # Generate a unique filename to prevent collisions
     timestamp = int(time.time())
@@ -761,8 +766,8 @@ async def transcribe_audio(file: UploadFile = File(...)):
         input_path = temp_file_path
         converted_path = None
         
-        # Check if conversion is needed (for non-wav/mp4 formats)
-        if file_ext not in ['.wav', '.mp4']:
+        # Check if conversion is needed (for non-wav/mp3 formats)
+        if file_ext not in ['.wav', '.mp3']:
             needs_conversion = True
             output_ext = '.wav'  # Default to WAV format
             converted_path = temp_file_path.rsplit('.', 1)[0] + output_ext

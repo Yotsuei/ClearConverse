@@ -136,12 +136,13 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
     audioChunksRef.current = [];
     try {
       // Determine the best audio format to use based on browser support
-      // Try to use WAV directly if possible, fallback to WebM (which will be converted on the server)
+      // Prioritize WAV and MP3 formats since they're directly supported by our backend
       const preferredFormats = [
         { mimeType: 'audio/wav', extension: '.wav' },
-        { mimeType: 'audio/mp4', extension: '.mp4' },
-        { mimeType: 'audio/webm', extension: '.webm' },
-        { mimeType: 'audio/ogg', extension: '.ogg' }
+        { mimeType: 'audio/mpeg', extension: '.mp3' },
+        { mimeType: 'audio/mp3', extension: '.mp3' },  // Some browsers use this MIME type
+        { mimeType: 'audio/webm', extension: '.wav' }, // Force .wav extension for webm
+        { mimeType: 'audio/ogg', extension: '.wav' }   // Force .wav extension for ogg
       ];
       
       let selectedFormat = null;
@@ -156,8 +157,8 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
       
       if (!selectedFormat) {
         // If none of the preferred formats are supported, use default
-        selectedFormat = { mimeType: '', extension: '.webm' };
-        console.log("Using default recording format (browser choice)");
+        selectedFormat = { mimeType: '', extension: '.wav' };
+        console.log("Using default recording format (browser choice) with .wav extension");
       }
       
       // Create MediaRecorder with the selected format if supported
@@ -183,15 +184,13 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
           
           // Determine the actual MIME type from the recorder
           const actualMimeType = mediaRecorder.mimeType || 'audio/webm';
+          console.log(`Recording MIME type: ${actualMimeType}`);
           
-          // Map MIME type to file extension
-          let fileExtension = '.webm'; // Default
-          if (actualMimeType.includes('wav')) {
-            fileExtension = '.wav';
-          } else if (actualMimeType.includes('mp4')) {
-            fileExtension = '.mp4';
-          } else if (actualMimeType.includes('ogg')) {
-            fileExtension = '.ogg';
+          // Force .wav or .mp3 extension regardless of the actual MIME type
+          // This ensures backend compatibility even if the browser uses a different format
+          let fileExtension = '.wav'; // Default to .wav
+          if (actualMimeType.includes('mpeg') || actualMimeType.includes('mp3')) {
+            fileExtension = '.mp3';
           }
           
           // Create blob with the correct MIME type
@@ -449,7 +448,7 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
               <li>Speak clearly and at a moderate pace</li>
               <li>Minimize background noise for better results</li>
               <li>Keep the microphone at a consistent distance</li>
-              <li>Recordings are automatically converted to WAV format for processing</li>
+              <li>Recordings are automatically converted to MP3 or WAV format for processing</li>
             </ul>
           </div>
         </>

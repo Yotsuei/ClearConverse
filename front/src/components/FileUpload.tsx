@@ -25,10 +25,30 @@ const FileUpload: React.FC<FileUploadProps> = ({
   const [uploadXhr, setUploadXhr] = useState<XMLHttpRequest | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
 
-  // Validate file type - strictly WAV and MP4 only
+  // Validate file type - prioritizing WAV and MP3 formats (most compatible)
   const isValidFileType = (file: File): boolean => {
-    const validExtensions = ['.wav', '.mp4'];
-    const validMimeTypes = ['audio/wav', 'video/mp4', 'audio/mp4'];
+    // Primary formats (fully supported)
+    const primaryExtensions = ['.wav', '.mp3'];
+    const primaryMimeTypes = [
+      'audio/wav', 
+      'audio/mpeg', 
+      'audio/mp3'
+    ];
+    
+    // Secondary formats (may require conversion)
+    const secondaryExtensions = ['.mp4', '.webm', '.ogg'];
+    const secondaryMimeTypes = [
+      'video/mp4', 
+      'audio/mp4',
+      'audio/webm',
+      'video/webm',
+      'audio/ogg',
+      'application/ogg'
+    ];
+    
+    // Combine all valid formats
+    const validExtensions = [...primaryExtensions, ...secondaryExtensions];
+    const validMimeTypes = [...primaryMimeTypes, ...secondaryMimeTypes];
     
     // Check file extension
     const hasValidExtension = validExtensions.some(ext => 
@@ -51,7 +71,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
       const selectedFile = event.target.files[0];
       
       if (!isValidFileType(selectedFile)) {
-        setFileError('Invalid file type. Only .wav and .mp4 files are accepted.');
+        setFileError('Invalid file type. Please use .wav or .mp3 files for best results.');
         setFile(null);
         return;
       }
@@ -84,7 +104,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
       const droppedFile = e.dataTransfer.files[0];
       
       if (!isValidFileType(droppedFile)) {
-        setFileError('Invalid file type. Only .wav and .mp4 files are accepted.');
+        setFileError('Invalid file type. Please use .wav or .mp3 files for best results.');
         setFile(null);
         return;
       }
@@ -170,7 +190,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
     <div className="flex flex-col items-center">
       <h2 className="text-xl font-bold text-gray-200 mb-4">Upload Audio File</h2>
       <p className="text-gray-400 mb-6 text-center">
-        Upload your audio or video file for transcription. Only WAV and MP4 files are supported.
+        Upload your audio or video file for transcription. WAV and MP3 formats are recommended for best results.
       </p>
       
       <div 
@@ -185,7 +205,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
         <input
           id="fileInput"
           type="file"
-          accept=".wav,.mp4"
+          accept=".wav,.mp4,.mp3,.webm,.ogg"
           onChange={handleFileChange}
           className="hidden"
         />
@@ -197,12 +217,12 @@ const FileUpload: React.FC<FileUploadProps> = ({
           <p className="mb-2 text-sm text-gray-400">
             <span className="font-semibold">Click to upload</span> or drag and drop
           </p>
-          <p className="text-xs text-gray-500">WAV or MP4 files only (MAX. 20MB)</p>
+          <p className="text-xs text-gray-500">Audio/video files only (MAX. 20MB)</p>
           <div className="mt-3 flex items-center text-xs text-blue-400">
             <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
             </svg>
-            Only .wav and .mp4 files are accepted
+            Recommended formats: .wav, .mp3 (best compatibility)
           </div>
         </div>
       </div>
@@ -270,10 +290,13 @@ const FileUpload: React.FC<FileUploadProps> = ({
           Supported File Formats
         </h3>
         <ul className="list-disc list-inside text-gray-300 space-y-1">
-          <li><span className="font-medium text-blue-400">.wav</span> - Waveform Audio File Format</li>
-          <li><span className="font-medium text-blue-400">.mp4</span> - MPEG-4 Video Files (audio will be extracted)</li>
+          <li><span className="font-medium text-green-400">.wav</span> - Waveform Audio Format (recommended)</li>
+          <li><span className="font-medium text-green-400">.mp3</span> - MP3 Audio Format (recommended)</li>
+          <li><span className="font-medium text-gray-400">.mp4</span> - MPEG-4 Video (audio will be extracted)</li>
+          <li><span className="font-medium text-gray-400">.webm</span> - WebM Audio/Video (may require conversion)</li>
+          <li><span className="font-medium text-gray-400">.ogg</span> - Ogg Vorbis Audio (may require conversion)</li>
         </ul>
-        <p className="mt-2 text-gray-400">For best transcription results, use clear audio with minimal background noise.</p>
+        <p className="mt-2 text-gray-400">For best results, use WAV or MP3 files with clear audio and minimal background noise. Other formats may cause processing errors.</p>
       </div>
     </div>
   );
