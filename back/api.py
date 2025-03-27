@@ -5,6 +5,7 @@ import shutil
 import logging
 import traceback
 import time
+import re
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -726,7 +727,10 @@ async def transcribe_audio(file: UploadFile = File(...)):
     safe_filename = os.path.basename(file.filename)
     
     # Validate file extension
-    if not safe_filename.lower().endswith((".mp3", ".wav", ".mp4", ".webm", ".ogg")):
+    valid_extensions = [".mp3", ".wav", ".mp4", ".webm", ".ogg"]
+    file_ext = os.path.splitext(safe_filename.lower())[1]
+    
+    if not any(safe_filename.lower().endswith(ext) for ext in valid_extensions):
         raise HTTPException(
             status_code=400, 
             detail="Invalid file type. Only MP3, WAV, MP4, WebM and OGG files are accepted."
@@ -751,36 +755,79 @@ async def transcribe_audio(file: UploadFile = File(...)):
                 detail=f"Failed to save uploaded file: {str(e)}"
             )
         
-        # For webm files, convert to wav format since some audio libraries have issues with webm
+        # Initialize conversion status
+        needs_conversion = False
+        conversion_successful = False
         input_path = temp_file_path
-        if temp_file_path.lower().endswith('.webm'):
+        converted_path = None
+        
+        # Check if conversion is needed (for non-wav/mp4 formats)
+        if file_ext not in ['.wav', '.mp4']:
+            needs_conversion = True
+            output_ext = '.wav'  # Default to WAV format
+            converted_path = temp_file_path.rsplit('.', 1)[0] + output_ext
+            
             try:
-                import ffmpeg
-                output_path = temp_file_path.rsplit('.', 1)[0] + '.wav'
+                # Check if ffmpeg is installed
+                import subprocess
+                try:
+                    subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True)
+                except (subprocess.SubprocessError, FileNotFoundError):
+                    raise ImportError("ffmpeg is not installed or not found in PATH")
                 
-                # Use ffmpeg to convert webm to wav
-                logging.info(f"Converting webm to wav: {temp_file_path} -> {output_path}")
+                # Import ffmpeg-python
+                try:
+                    import ffmpeg
+                except ImportError:
+                    logging.error("ffmpeg-python package not installed")
+                    raise ImportError("ffmpeg-python package is required for audio conversion")
                 
-                # Run the ffmpeg conversion
-                (
-                    ffmpeg
-                    .input(temp_file_path)
-                    .output(output_path, acodec='pcm_s16le', ar=16000, ac=1)
-                    .overwrite_output()
-                    .run(quiet=True, capture_stdout=True, capture_stderr=True)
-                )
+                # Log conversion details
+                logging.info(f"Converting {file_ext} to {output_ext}: {temp_file_path} -> {converted_path}")
                 
-                logging.info(f"Conversion successful")
+                # Run the ffmpeg conversion with explicit error handling
+                try:
+                    (
+                        ffmpeg
+                        .input(temp_file_path)
+                        .output(converted_path, acodec='pcm_s16le', ar=16000, ac=1)
+                        .overwrite_output()
+                        .run(quiet=True, capture_stdout=True, capture_stderr=True)
+                    )
+                    
+                    # Verify the converted file exists and has content
+                    if os.path.exists(converted_path) and os.path.getsize(converted_path) > 0:
+                        conversion_successful = True
+                        input_path = converted_path
+                        logging.info(f"Conversion successful: {converted_path}")
+                    else:
+                        raise Exception("Converted file is empty or was not created")
+                        
+                except ffmpeg.Error as e:
+                    # Get detailed error from ffmpeg
+                    stderr = e.stderr.decode() if hasattr(e, 'stderr') else str(e)
+                    logging.error(f"FFmpeg conversion error: {stderr}")
+                    raise Exception(f"FFmpeg conversion failed: {stderr}")
                 
-                # Update the path to point to the converted file
-                input_path = output_path
-                
-            except Exception as e:
-                logging.error(f"Failed to convert webm file: {e}")
+            except ImportError as e:
+                logging.error(f"Dependency error: {e}")
                 raise HTTPException(
                     status_code=500,
-                    detail=f"Error converting webm file: {str(e)}"
+                    detail=f"Server is missing required dependencies for conversion: {str(e)}"
                 )
+            except Exception as e:
+                logging.error(f"Conversion error: {e}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Error converting audio file: {str(e)}"
+                )
+        
+        # If conversion is needed but failed, raise an error
+        if needs_conversion and not conversion_successful:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to convert the audio file to a supported format"
+            )
         
         # Process the audio file (now using the potentially converted file)
         try:
@@ -802,11 +849,22 @@ async def transcribe_audio(file: UploadFile = File(...)):
             
         # Clean up the temporary files
         try:
-            if os.path.exists(temp_file_path):
-                os.remove(temp_file_path)
-            # Also remove the converted wav file if it was created
-            if input_path != temp_file_path and os.path.exists(input_path):
-                os.remove(input_path)
+            # Define cleanup function to handle all temporary files
+            def cleanup_temp_files():
+                files_to_remove = [temp_file_path]
+                if converted_path and converted_path != temp_file_path:
+                    files_to_remove.append(converted_path)
+                
+                for file_path in files_to_remove:
+                    if os.path.exists(file_path):
+                        try:
+                            os.remove(file_path)
+                            logging.info(f"Removed temporary file: {file_path}")
+                        except Exception as e:
+                            logging.warning(f"Failed to remove temporary file {file_path}: {e}")
+            
+            # Run cleanup
+            cleanup_temp_files()
         except Exception as e:
             logging.error(f"Failed to remove temporary file(s): {e}")
         
@@ -839,6 +897,13 @@ async def transcribe_audio(file: UploadFile = File(...)):
             except:
                 pass
                 
+        # Also clean up the converted file if it exists
+        if 'converted_path' in locals() and converted_path and os.path.exists(converted_path):
+            try:
+                os.remove(converted_path)
+            except:
+                pass
+                
         raise HTTPException(
             status_code=500,
             detail=f"Internal server error: {str(e)}"
@@ -850,14 +915,36 @@ async def download_transcript(file_path: str):
     Download a transcript file by path.
     The file_path is relative to the OUTPUT_DIR.
     """
-    # Sanitize the file path to prevent directory traversal
-    safe_path = Path(file_path).name
-    for part in Path(file_path).parts:
-        if part != ".." and part != "." and part != "/":
-            if part != safe_path:  # Skip the filename which we already added
-                safe_path = os.path.join(part, safe_path)
-    
-    transcript_path = Path(OUTPUT_DIR) / safe_path
+    # Secure path handling to prevent directory traversal
+    try:
+        # Remove any potentially dangerous path components
+        # This regex only allows alphanumeric chars, underscore, dash, and forward slash
+        if not re.match(r'^[a-zA-Z0-9_\-/]+$', file_path):
+            raise ValueError("Path contains invalid characters")
+            
+        # Normalize the path to remove any redundant separators
+        normalized_path = os.path.normpath(file_path)
+        
+        # Ensure the path doesn't try to go up directories
+        if normalized_path.startswith('..') or '/../' in normalized_path:
+            raise ValueError("Path traversal attempt detected")
+            
+        # Construct the full path, ensuring we stay within OUTPUT_DIR
+        transcript_path = Path(OUTPUT_DIR) / normalized_path
+        
+        # Double-check path is within OUTPUT_DIR
+        output_dir_resolved = Path(OUTPUT_DIR).resolve()
+        transcript_path_resolved = transcript_path.resolve()
+        
+        if not str(transcript_path_resolved).startswith(str(output_dir_resolved)):
+            raise ValueError("Path would escape the output directory")
+            
+    except (ValueError, RuntimeError) as e:
+        logging.error(f"Path validation error: {str(e)}")
+        raise HTTPException(
+            status_code=400, 
+            detail="Invalid file path specified."
+        )
     
     if not transcript_path.exists():
         raise HTTPException(

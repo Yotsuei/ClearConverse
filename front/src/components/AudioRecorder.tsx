@@ -110,25 +110,39 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
 
     audioChunksRef.current = [];
     try {
-      // Determine which audio MIME types are supported by the browser
-      const mimeTypes = [
-        'audio/webm', 
-        'audio/mp4', 
-        'audio/ogg', 
-        'audio/wav'
+      // Determine the best audio format to use based on browser support
+      // Try to use WAV directly if possible, fallback to WebM (which will be converted on the server)
+      const preferredFormats = [
+        { mimeType: 'audio/wav', extension: '.wav' },
+        { mimeType: 'audio/mp4', extension: '.mp4' },
+        { mimeType: 'audio/webm', extension: '.webm' },
+        { mimeType: 'audio/ogg', extension: '.ogg' }
       ];
       
-      let mimeType = 'audio/webm'; // Default to webm
+      let selectedFormat = null;
       
-      for (const type of mimeTypes) {
-        if (MediaRecorder.isTypeSupported(type)) {
-          mimeType = type;
-          console.log(`Using supported MIME type: ${mimeType}`);
+      for (const format of preferredFormats) {
+        if (MediaRecorder.isTypeSupported(format.mimeType)) {
+          selectedFormat = format;
+          console.log(`Using supported recording format: ${format.mimeType}`);
           break;
         }
       }
       
-      const mediaRecorder = new MediaRecorder(audioStream, { mimeType });
+      if (!selectedFormat) {
+        // If none of the preferred formats are supported, use default
+        selectedFormat = { mimeType: '', extension: '.webm' };
+        console.log("Using default recording format (browser choice)");
+      }
+      
+      // Create MediaRecorder with the selected format if supported
+      const recorderOptions = selectedFormat.mimeType ? 
+        { mimeType: selectedFormat.mimeType } : {};
+        
+      const mediaRecorder = new MediaRecorder(audioStream, recorderOptions);
+      
+      // Log the actual format being used
+      console.log(`MediaRecorder initialized with mimeType: ${mediaRecorder.mimeType}`);
       
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -142,12 +156,32 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
             throw new Error("No audio data recorded");
           }
           
+          // Determine the actual MIME type from the recorder
+          const actualMimeType = mediaRecorder.mimeType || 'audio/webm';
+          
+          // Map MIME type to file extension
+          let fileExtension = '.webm'; // Default
+          if (actualMimeType.includes('wav')) {
+            fileExtension = '.wav';
+          } else if (actualMimeType.includes('mp4')) {
+            fileExtension = '.mp4';
+          } else if (actualMimeType.includes('ogg')) {
+            fileExtension = '.ogg';
+          }
+          
           // Create blob with the correct MIME type
-          const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
-          console.log(`Created audio blob with type: ${audioBlob.type}, size: ${audioBlob.size} bytes`);
+          const audioBlob = new Blob(audioChunksRef.current, { type: actualMimeType });
+          console.log(`Created audio blob with type: ${audioBlob.type}, size: ${audioBlob.size} bytes, using extension: ${fileExtension}`);
+          
+          // Create file object with the correct extension
+          const fileName = `recording${fileExtension}`;
+          const file = new File([audioBlob], fileName, { type: actualMimeType });
+          
+          // Create object URL for preview
+          const url = URL.createObjectURL(audioBlob);
           
           setRecordingBlob(audioBlob);
-          onRecordingComplete(audioBlob);
+          onRecordingComplete(file);
           setError(null); // Clear any errors on successful recording
         } catch (err) {
           console.error("Error finalizing recording:", err);
@@ -377,7 +411,7 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
               <li>Speak clearly and at a moderate pace</li>
               <li>Minimize background noise for better results</li>
               <li>Keep the microphone at a consistent distance</li>
-              <li>Recordings are saved in your browser's native audio format</li>
+              <li>Recordings are automatically converted to WAV format for processing</li>
             </ul>
           </div>
         </>
