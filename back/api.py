@@ -751,10 +751,41 @@ async def transcribe_audio(file: UploadFile = File(...)):
                 detail=f"Failed to save uploaded file: {str(e)}"
             )
         
-        # Process the audio file
+        # For webm files, convert to wav format since some audio libraries have issues with webm
+        input_path = temp_file_path
+        if temp_file_path.lower().endswith('.webm'):
+            try:
+                import ffmpeg
+                output_path = temp_file_path.rsplit('.', 1)[0] + '.wav'
+                
+                # Use ffmpeg to convert webm to wav
+                logging.info(f"Converting webm to wav: {temp_file_path} -> {output_path}")
+                
+                # Run the ffmpeg conversion
+                (
+                    ffmpeg
+                    .input(temp_file_path)
+                    .output(output_path, acodec='pcm_s16le', ar=16000, ac=1)
+                    .overwrite_output()
+                    .run(quiet=True, capture_stdout=True, capture_stderr=True)
+                )
+                
+                logging.info(f"Conversion successful")
+                
+                # Update the path to point to the converted file
+                input_path = output_path
+                
+            except Exception as e:
+                logging.error(f"Failed to convert webm file: {e}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Error converting webm file: {str(e)}"
+                )
+        
+        # Process the audio file (now using the potentially converted file)
         try:
             audio_path, transcript, transcript_file_path = processor.run(
-                str(temp_file_path), 
+                str(input_path), 
                 output_dir=OUTPUT_DIR,
                 debug_mode=False
             )
@@ -769,12 +800,15 @@ async def transcribe_audio(file: UploadFile = File(...)):
                 detail=f"Error processing audio: {str(e)}"
             )
             
-        # Clean up the temporary file
+        # Clean up the temporary files
         try:
             if os.path.exists(temp_file_path):
                 os.remove(temp_file_path)
+            # Also remove the converted wav file if it was created
+            if input_path != temp_file_path and os.path.exists(input_path):
+                os.remove(input_path)
         except Exception as e:
-            logging.error(f"Failed to remove temporary file {temp_file_path}: {e}")
+            logging.error(f"Failed to remove temporary file(s): {e}")
         
         # Compute relative path from OUTPUT_DIR for the download URL
         try:
