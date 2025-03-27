@@ -3,7 +3,7 @@ import React, { useRef, useState, useEffect } from 'react';
 
 interface AudioPlayerProps {
   audioUrl: string;
-  onTranscribe?: () => void;
+  onTranscribe?: () => void; // Keeping the prop but won't render the button
 }
 
 const AudioPlayer: React.FC<AudioPlayerProps> = ({ audioUrl, onTranscribe }) => {
@@ -163,15 +163,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ audioUrl, onTranscribe }) => 
         </button>
       </div>
 
-      {/* Transcribe button at the bottom */}
-      {onTranscribe && (
-        <button
-          onClick={onTranscribe}
-          className="w-full py-3 px-5 text-white font-bold rounded-lg transition-all duration-300 bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg"
-        >
-          Transcribe Audio
-        </button>
-      )}
+      {/* Removed "Transcribe Audio" button */}
     </div>
   );
 };

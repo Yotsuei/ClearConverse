@@ -80,6 +80,12 @@ const App: React.FC = () => {
     setUploadProgress(0);
     setIsProcessing(false);
     setProcessingProgress(0);
+    
+    // Also clear the file input if it exists
+    const fileInput = document.getElementById('fileInput') as HTMLInputElement;
+    if (fileInput) {
+      fileInput.value = '';
+    }
   };
   
   const clearTranscription = () => {

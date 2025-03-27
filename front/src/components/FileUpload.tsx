@@ -186,6 +186,21 @@ const FileUpload: React.FC<FileUploadProps> = ({
     }
   };
 
+  const handleCompleteReset = () => {
+    // Reset the file state
+    setFile(null);
+    setFileError(null);
+    
+    // Reset file input
+    const fileInput = document.getElementById('fileInput') as HTMLInputElement;
+    if (fileInput) {
+      fileInput.value = '';
+    }
+    
+    // Clear any transcription
+    clearTranscription();
+  };
+
   return (
     <div className="flex flex-col items-center">
       <h2 className="text-xl font-bold text-gray-200 mb-4">Upload Audio File</h2>

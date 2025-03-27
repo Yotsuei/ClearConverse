@@ -80,34 +80,6 @@ const ProgressBar: React.FC<ProgressBarProps> = ({ progress, type, onCancel }) =
         />
       </div>
       
-      {/* Processing stages */}
-      <div className="mt-4 grid grid-cols-4 gap-2">
-        <Stage 
-          title={type === 'upload' ? "Upload" : "Analyze"}
-          isActive={progress > 0}
-          isComplete={progress >= 25}
-          type={type}
-        />
-        <Stage 
-          title={type === 'upload' ? "Verify" : "Process"}
-          isActive={progress >= 25}
-          isComplete={progress >= 50}
-          type={type}
-        />
-        <Stage 
-          title={type === 'upload' ? "Complete" : "Generate"}
-          isActive={progress >= 50}
-          isComplete={progress >= 75}
-          type={type}
-        />
-        <Stage 
-          title="Finalize"
-          isActive={progress >= 75}
-          isComplete={progress >= 100}
-          type={type}
-        />
-      </div>
-      
       <style jsx>{`
         @keyframes pulse {
           0%, 100% {
@@ -118,50 +90,6 @@ const ProgressBar: React.FC<ProgressBarProps> = ({ progress, type, onCancel }) =
           }
         }
       `}</style>
-    </div>
-  );
-};
-
-interface StageProps {
-  title: string;
-  isActive: boolean;
-  isComplete: boolean;
-  type: 'upload' | 'processing';
-}
-
-const Stage: React.FC<StageProps> = ({ title, isActive, isComplete, type }) => {
-  const getGradient = () => {
-    return type === 'upload' 
-      ? 'bg-gradient-to-r from-blue-600 to-blue-700' 
-      : 'bg-gradient-to-r from-blue-500 to-blue-600';
-  };
-  
-  const getAnimationColor = () => {
-    return type === 'upload' ? 'bg-blue-600' : 'bg-blue-500';
-  };
-  
-  const getTextColor = () => {
-    return type === 'upload' ? 'text-blue-400' : 'text-blue-400';
-  };
-
-  return (
-    <div className="flex flex-col items-center">
-      <div 
-        className={`w-8 h-8 rounded-full flex items-center justify-center mb-1 transition-colors
-          ${isComplete ? getGradient() + ' text-white' : 
-            isActive ? getAnimationColor() + ' text-white animate-pulse' : 'bg-gray-700 text-gray-500'}`}
-      >
-        {isComplete ? (
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-          </svg>
-        ) : (
-          <span className="text-xs">{title.charAt(0)}</span>
-        )}
-      </div>
-      <span className={`text-xs ${isActive ? getTextColor() : 'text-gray-500'}`}>
-        {title}
-      </span>
     </div>
   );
 };
