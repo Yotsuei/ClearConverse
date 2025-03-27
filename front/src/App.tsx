@@ -47,8 +47,24 @@ const App: React.FC = () => {
   };
 
   const handleRecordingComplete = (blob: Blob) => {
-    const file = new File([blob], "recording.wav", { type: "audio/wav" });
+    // Get the correct MIME type and extension from the blob
+    let fileExtension = '.webm'; // Default extension
+    
+    // Map MIME types to file extensions
+    if (blob.type.includes('mp4')) {
+      fileExtension = '.mp4';
+    } else if (blob.type.includes('ogg')) {
+      fileExtension = '.ogg';
+    } else if (blob.type.includes('wav')) {
+      fileExtension = '.wav';
+    }
+    
+    console.log(`Recording blob received with type: ${blob.type}, using extension: ${fileExtension}`);
+    
+    // Create file with the correct MIME type - this is critical!
+    const file = new File([blob], `recording${fileExtension}`, { type: blob.type });
     const url = URL.createObjectURL(blob);
+    
     setAudioSource({ file, url });
   };
 
@@ -67,7 +83,8 @@ const App: React.FC = () => {
   };
   
   const clearTranscription = () => {
-    // Only clear the transcription result, keep the audio file
+    // Clear both the transcription result and the audio file
+    setAudioSource({ file: null, url: null });
     setTranscript(null);
     setDownloadUrl(null);
     setIsProcessing(false);
@@ -138,6 +155,9 @@ const App: React.FC = () => {
   const handleTranscribe = () => {
     if (!audioSource.file) return;
     
+    // Log the file details for debugging
+    console.log(`Sending file: ${audioSource.file.name}, type: ${audioSource.file.type}, size: ${audioSource.file.size} bytes`);
+    
     setIsUploading(true);
     setUploadProgress(0);
     const formData = new FormData();
@@ -168,14 +188,18 @@ const App: React.FC = () => {
           const response = JSON.parse(xhr.responseText);
           handleUploadResponse(response.transcript, response.download_url);
         } else {
-          throw new Error(`Error: ${xhr.statusText}`);
+          console.error(`Server error: ${xhr.status} ${xhr.statusText}`);
+          console.error(`Response: ${xhr.responseText}`);
+          setIsUploading(false);
+          alert(`Error: ${xhr.statusText || 'Server error'}\n${xhr.responseText || ''}`);
         }
       };
 
       xhr.onerror = function() {
         xhrRef.current = null;
         setIsUploading(false);
-        throw new Error('Network error occurred');
+        console.error('Network error occurred');
+        alert('Network error occurred. Please check your connection and try again.');
       };
 
       xhr.onabort = function() {

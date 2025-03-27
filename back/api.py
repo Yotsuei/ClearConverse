@@ -716,7 +716,7 @@ except Exception as e:
 async def transcribe_audio(file: UploadFile = File(...)):
     """
     Process an uploaded audio file and return the transcript.
-    Accepts .mp3 and .wav files.
+    Accepts .mp3, .wav, .mp4, .webm, and .ogg files.
     """
     
     if not file.filename:
@@ -726,10 +726,10 @@ async def transcribe_audio(file: UploadFile = File(...)):
     safe_filename = os.path.basename(file.filename)
     
     # Validate file extension
-    if not safe_filename.lower().endswith((".mp3", ".wav")):
+    if not safe_filename.lower().endswith((".mp3", ".wav", ".mp4", ".webm", ".ogg")):
         raise HTTPException(
             status_code=400, 
-            detail="Invalid file type. Only MP3 and WAV files are accepted."
+            detail="Invalid file type. Only MP3, WAV, MP4, WebM and OGG files are accepted."
         )
     
     # Generate a unique filename to prevent collisions

@@ -110,7 +110,25 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
 
     audioChunksRef.current = [];
     try {
-      const mediaRecorder = new MediaRecorder(audioStream);
+      // Determine which audio MIME types are supported by the browser
+      const mimeTypes = [
+        'audio/webm', 
+        'audio/mp4', 
+        'audio/ogg', 
+        'audio/wav'
+      ];
+      
+      let mimeType = 'audio/webm'; // Default to webm
+      
+      for (const type of mimeTypes) {
+        if (MediaRecorder.isTypeSupported(type)) {
+          mimeType = type;
+          console.log(`Using supported MIME type: ${mimeType}`);
+          break;
+        }
+      }
+      
+      const mediaRecorder = new MediaRecorder(audioStream, { mimeType });
       
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -123,7 +141,11 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
           if (audioChunksRef.current.length === 0) {
             throw new Error("No audio data recorded");
           }
-          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+          
+          // Create blob with the correct MIME type
+          const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+          console.log(`Created audio blob with type: ${audioBlob.type}, size: ${audioBlob.size} bytes`);
+          
           setRecordingBlob(audioBlob);
           onRecordingComplete(audioBlob);
           setError(null); // Clear any errors on successful recording
@@ -355,7 +377,7 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
               <li>Speak clearly and at a moderate pace</li>
               <li>Minimize background noise for better results</li>
               <li>Keep the microphone at a consistent distance</li>
-              <li>Recordings are saved as WAV files</li>
+              <li>Recordings are saved in your browser's native audio format</li>
             </ul>
           </div>
         </>
