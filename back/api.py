@@ -173,7 +173,7 @@ class EnhancedAudioProcessor:
         self.vad_pipeline = Pipeline.from_pretrained(
             "pyannote/voice-activity-detection",
             use_auth_token=self.config.auth_token,
-            cache_dir=os.path.join(cache_dir, "VAD")
+            cache_dir=os.path.join(cache_dir, "vad")
         ).to(self.device)
 
         self.embedding_model = Inference(
