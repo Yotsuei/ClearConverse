@@ -50,25 +50,25 @@ class Config:
     auth_token: str
     target_sample_rate: int = 16000
     # Increase minimum segment duration to ensure segments are long enough for reliable embedding extraction.
-    min_segment_duration: float = 0.5  
+    min_segment_duration: float = 0.75  
     # Slightly higher threshold to detect overlaps (adjust based on audio characteristics).
-    overlap_threshold: float = 0.5  
+    overlap_threshold: float = 0.65  
     condition_on_previous_text: bool = True
     # Tighten gap threshold to avoid merging distinct speaker turns.
-    merge_gap_threshold: float = 0.75  
+    merge_gap_threshold: float = 0.5  
     # Increase the minimum duration for overlap separation.
-    min_overlap_duration_for_separation: float = 0.5  
+    min_overlap_duration_for_separation: float = 0.6  
     # Use more segments for a more robust speaker embedding average.
     max_embedding_segments: int = 100  
     enhance_separated_audio: bool = True
     use_vad_refinement: bool = True
     # Adjust the speaker embedding threshold if needed for more sensitive matching.
-    speaker_embedding_threshold: float = 0.50  
+    speaker_embedding_threshold: float = 0.45  
     # Increase noise reduction to help cleaner input for diarization and embedding.
-    noise_reduction_amount: float = 0.85  
+    noise_reduction_amount: float = 0.65  
     transcription_batch_size: int = 8
     use_speaker_embeddings: bool = True
-    temperature: float = 0.0
+    temperature: float = 0.1
     max_speakers: int = 2
     min_speakers: int = 1
     whisper_model_size: str = "small.en"
@@ -78,7 +78,7 @@ class Config:
     # Use a finer step to get smoother segmentation in overlaps.
     sliding_window_step: float = 0.5  
     # Increase the secondary diarization threshold to catch more misclassifications.
-    secondary_diarization_threshold: float = 0.40
+    secondary_diarization_threshold: float = 0.35
 
 def merge_diarization_segments(segments: List[Tuple[float, float, str]], gap_threshold: float) -> List[Tuple[float, float, str]]:
     if not segments:
@@ -153,23 +153,35 @@ class EnhancedAudioProcessor:
 
     def _initialize_models(self):
         logging.info(f"Initializing models on {self.device}...")
+        cache_dir = "models"  # Set your custom cache directory here
+
         self.separator = SepformerSeparation.from_hparams(
             source="speechbrain/resepformer-wsj02mix",
-            savedir="tmpdir_resepformer",
+            savedir=os.path.join(cache_dir, "resepformer"),
             run_opts={"device": self.device}
         )
-        self.whisper_model = whisper.load_model(self.config.whisper_model_size).to(self.device)
+
+        # If whisper.load_model supports specifying a download root, do so:
+        self.whisper_model = whisper.load_model(self.config.whisper_model_size, download_root=os.path.join(cache_dir, "whisper")).to(self.device)
+
         self.diarization = Pipeline.from_pretrained(
             "pyannote/speaker-diarization-3.1",
-            use_auth_token=self.config.auth_token
+            use_auth_token=self.config.auth_token,
+            cache_dir=os.path.join(cache_dir, "speaker-diarization")
         ).to(self.device)
+
         self.vad_pipeline = Pipeline.from_pretrained(
             "pyannote/voice-activity-detection",
-            use_auth_token=self.config.auth_token
+            use_auth_token=self.config.auth_token,
+            cache_dir=os.path.join(cache_dir, "VAD")
         ).to(self.device)
+
         self.embedding_model = Inference(
-            "pyannote/embedding", window="whole", use_auth_token=self.config.auth_token
+            "pyannote/embedding",
+            window="whole",
+            use_auth_token=self.config.auth_token,
         ).to(self.device)
+
         logging.info("Models initialized successfully!")
 
     def load_audio(self, file_path: str) -> Tuple[torch.Tensor, int]:
@@ -429,7 +441,7 @@ class EnhancedAudioProcessor:
                                 sub_audio = self._extract_segment(audio_segment, new_start - seg_start, new_end - seg_start)
                                 transcription = self.whisper_model.transcribe(
                                     sub_audio.squeeze().cpu().numpy(),
-                                    initial_prompt="This is a conversation between two people.",
+                                    initial_prompt="This is a clear conversation with complete sentences.",
                                     word_timestamps=True,
                                     condition_on_previous_text=self.config.condition_on_previous_text,
                                     temperature=self.config.temperature
