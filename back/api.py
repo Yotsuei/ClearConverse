@@ -4,12 +4,16 @@ import json
 import shutil
 import logging
 import traceback
-from fastapi import FastAPI, UploadFile, File, HTTPException
+import uuid
+import asyncio
+from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, BackgroundTasks
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 import uvicorn
 from dotenv import load_dotenv
+from datetime import datetime, timedelta
+from apscheduler.schedulers.background import BackgroundScheduler
 
 # Import necessary libraries for audio processing
 import torch
@@ -153,35 +157,28 @@ class EnhancedAudioProcessor:
 
     def _initialize_models(self):
         logging.info(f"Initializing models on {self.device}...")
-        cache_dir = "models"  # Set your custom cache directory here
-
+        cache_dir = "models"  
         self.separator = SepformerSeparation.from_hparams(
             source="speechbrain/resepformer-wsj02mix",
             savedir=os.path.join(cache_dir, "resepformer"),
             run_opts={"device": self.device}
         )
-
-        # If whisper.load_model supports specifying a download root, do so:
         self.whisper_model = whisper.load_model(self.config.whisper_model_size, download_root=os.path.join(cache_dir, "whisper")).to(self.device)
-
         self.diarization = Pipeline.from_pretrained(
             "pyannote/speaker-diarization-3.1",
             use_auth_token=self.config.auth_token,
             cache_dir=os.path.join(cache_dir, "speaker-diarization")
         ).to(self.device)
-
         self.vad_pipeline = Pipeline.from_pretrained(
             "pyannote/voice-activity-detection",
             use_auth_token=self.config.auth_token,
             cache_dir=os.path.join(cache_dir, "vad")
         ).to(self.device)
-
         self.embedding_model = Inference(
             "pyannote/embedding",
             window="whole",
             use_auth_token=self.config.auth_token,
         ).to(self.device)
-
         logging.info("Models initialized successfully!")
 
     def load_audio(self, file_path: str) -> Tuple[torch.Tensor, int]:
@@ -568,22 +565,26 @@ class EnhancedAudioProcessor:
         logging.info(f"Overlap segments: {sum(1 for s in segments if s.is_overlap)}")
         logging.info(f"Regular segments: {sum(1 for s in segments if not s.is_overlap)}")
 
-    def run(self, input_file, output_dir: str = "processed_audio", debug_mode: bool = False):
+    def run(self, input_file, output_dir: str = "processed_audio", debug_mode: bool = False, progress_callback=None):
         try:
-            base_filename = os.path.splitext(os.path.basename(input_file))[0]
-            file_output_dir = os.path.join(output_dir, base_filename)
-            os.makedirs(file_output_dir, exist_ok=True)
+            if progress_callback:
+                progress_callback(5, "Starting processing")
+            # In temporary mode, use the provided output_dir (which should be task-specific)
+            os.makedirs(output_dir, exist_ok=True)
             logging.info(f"Processing file: {input_file}")
+            
+            if progress_callback:
+                progress_callback(30, "Running file processing")
             results = self.process_file(input_file)
-            self.save_segments(results['segments'], file_output_dir)
+            
+            if progress_callback:
+                progress_callback(60, "Saving processed segments")
+            self.save_segments(results['segments'], output_dir)
             if debug_mode:
-                self.save_debug_segments(results['segments'], file_output_dir)
-            logging.info("Processing completed!")
-            logging.info(f"Total duration: {results['metadata']['duration']:.2f} seconds")
-            logging.info(f"Speaker A segments: {results['metadata']['speaker_a_segments']}")
-            logging.info(f"Speaker B segments: {results['metadata']['speaker_b_segments']}")
-            logging.info(f"Total segments: {results['metadata']['total_segments']}")
-            transcript_path = os.path.join(file_output_dir, "transcript.txt")
+                self.save_debug_segments(results['segments'], output_dir)
+            if progress_callback:
+                progress_callback(80, "Saving transcript")
+            transcript_path = os.path.join(output_dir, "transcript.txt")
             transcript = ""
             for segment in results['segments']:
                 transcript += f"[{segment.speaker_id}] {segment.start:.2f}s - {segment.end:.2f}s\n"
@@ -591,6 +592,8 @@ class EnhancedAudioProcessor:
             with open(transcript_path, "w", encoding='utf-8') as f:
                 f.write(transcript)
             logging.info(f"Transcript saved to: {transcript_path}")
+            if progress_callback:
+                progress_callback(100, "Processing completed")
             return input_file, transcript, transcript_path
         except Exception as e:
             logging.error(f"Error during processing: {e}")
@@ -606,7 +609,6 @@ app = FastAPI(
     description="API to process audio files (MP3/WAV) and return a formatted transcript. The transcript can also be downloaded as a TXT file."
 )
 
-# Allow CORS if needed
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -615,17 +617,90 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Create a directory for processed outputs if not exists
+# Global output directory – but each task will have its own subfolder.
 OUTPUT_DIR = "processed_audio"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-
-load_dotenv()  # this loads variables from .env into the environment
+load_dotenv()
 AUTH_TOKEN = os.getenv("HF_AUTH_TOKEN")
 config = Config(auth_token=AUTH_TOKEN)
 processor = EnhancedAudioProcessor(config)
 
-@app.post("/transcribe", summary="Upload an audio file and get the transcript")
+# Global dictionaries to track progress and results
+progress_store: Dict[str, Dict] = {}
+result_store: Dict[str, Dict] = {}
+
+CLEANUP_THRESHOLD = timedelta(minutes=30)
+
+def cleanup_old_tasks():
+    """Delete task folders in OUTPUT_DIR older than CLEANUP_THRESHOLD."""
+    now = datetime.now()
+    for task_folder in Path(OUTPUT_DIR).iterdir():
+        if task_folder.is_dir():
+            # Get folder's last modified time
+            folder_mtime = datetime.fromtimestamp(task_folder.stat().st_mtime)
+            if now - folder_mtime > CLEANUP_THRESHOLD:
+                logging.info(f"Cleaning up old task folder: {task_folder}")
+                shutil.rmtree(task_folder)
+
+# Start APScheduler when the app starts
+scheduler = BackgroundScheduler()
+scheduler.add_job(cleanup_old_tasks, 'interval', minutes=10)  # run every 10 minutes
+scheduler.start()
+
+# Make sure to shut down the scheduler when the app exits.
+import atexit
+atexit.register(lambda: scheduler.shutdown())
+
+def update_progress(task_id: str, percent: int, message: str):
+    progress_store[task_id] = {"progress": percent, "message": message}
+    logging.info(f"Task {task_id}: {percent}% - {message}")
+
+async def process_audio_with_progress(task_id: str, file_path: str):
+    try:
+        # Use a task-specific output folder.
+        task_output_dir = os.path.join(OUTPUT_DIR, task_id)
+        processor.run(file_path, output_dir=task_output_dir, debug_mode=False, progress_callback=lambda p, m: update_progress(task_id, p, m))
+        result_store[task_id] = {"download_url": f"/download/{task_id}/transcript.txt"}
+    except Exception as e:
+        update_progress(task_id, 100, f"Error: {str(e)}")
+        result_store[task_id] = {"error": str(e)}
+
+@app.post("/transcribe_async", summary="Upload an audio file and process asynchronously with progress updates")
+async def transcribe_audio_async(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
+    if not file.filename.endswith((".mp3", ".wav")):
+        raise HTTPException(status_code=400, detail="Invalid file type. Only MP3 and WAV files are accepted.")
+    try:
+        temp_dir = Path("temp_uploads")
+        temp_dir.mkdir(exist_ok=True)
+        temp_file_path = temp_dir / file.filename
+        with open(temp_file_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+        task_id = str(uuid.uuid4())
+        update_progress(task_id, 0, "Task queued")
+        background_tasks.add_task(process_audio_with_progress, task_id, str(temp_file_path))
+        return JSONResponse(content={"task_id": task_id})
+    except Exception as e:
+        logging.error(f"Error in /transcribe_async endpoint: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.websocket("/ws/progress/{task_id}", summary="WebSocket endpoint for progress updates")
+async def progress_ws(websocket: WebSocket, task_id: str):
+    await websocket.accept()
+    try:
+        while True:
+            data = progress_store.get(task_id, {"progress": 0, "message": "Waiting..."})
+            await websocket.send_json(data)
+            if data.get("progress", 0) >= 100:
+                break
+            await asyncio.sleep(1)
+    except Exception as e:
+        logging.error(f"WebSocket error for task {task_id}: {e}")
+    finally:
+        await websocket.close()
+
+@app.post("/transcribe", summary="Upload an audio file and get the transcript synchronously")
 async def transcribe_audio(file: UploadFile = File(...)):
     if not file.filename.endswith((".mp3", ".wav")):
         raise HTTPException(status_code=400, detail="Invalid file type. Only MP3 and WAV files are accepted.")
@@ -636,11 +711,12 @@ async def transcribe_audio(file: UploadFile = File(...)):
         with open(temp_file_path, "wb") as f:
             content = await file.read()
             f.write(content)
-        audio_path, transcript, transcript_file_path = processor.run(str(temp_file_path), debug_mode=False)
+        # For synchronous mode, create a unique task folder for temporary storage.
+        task_id = str(uuid.uuid4())
+        task_output_dir = os.path.join(OUTPUT_DIR, task_id)
+        audio_path, transcript, transcript_file_path = processor.run(str(temp_file_path), output_dir=task_output_dir, debug_mode=False)
         os.remove(temp_file_path)
-        # Compute relative path from OUTPUT_DIR so that the nested folder is preserved
-        rel_path = Path(transcript_file_path).relative_to(Path(OUTPUT_DIR))
-        download_url = f"/download/{rel_path}"
+        download_url = f"/download/{task_id}/transcript.txt"
         return JSONResponse(content={"audio_file": audio_path, "transcript": transcript, "download_url": download_url})
     except Exception as e:
         logging.error(f"Error in /transcribe endpoint: {e}")
@@ -653,9 +729,15 @@ async def download_transcript(file_path: str):
         raise HTTPException(status_code=404, detail="Transcript file not found.")
     return FileResponse(path=str(transcript_path), media_type="text/plain", filename=transcript_path.name)
 
-# =============================================================================
-# Main entry point
-# =============================================================================
+# New cleanup endpoint to remove the temporary processed_audio folder for a given task.
+@app.delete("/cleanup/{task_id}", summary="Clean up temporary processed files for a given task")
+async def cleanup(task_id: str):
+    task_folder = Path(OUTPUT_DIR) / task_id
+    if task_folder.exists() and task_folder.is_dir():
+        shutil.rmtree(task_folder)
+        return JSONResponse(content={"status": f"Cleaned up files for task {task_id}"})
+    else:
+        raise HTTPException(status_code=404, detail="Task folder not found.")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
