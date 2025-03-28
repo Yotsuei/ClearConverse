@@ -46,3 +46,4 @@ openai-whisper
 dotenv
 ffmpeg-python
 apscheduler
+websockets
