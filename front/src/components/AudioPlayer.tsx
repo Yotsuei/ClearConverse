@@ -3,7 +3,7 @@ import React, { useRef, useState, useEffect } from 'react';
 
 interface AudioPlayerProps {
   audioUrl: string;
-  onTranscribe?: () => void;
+  onTranscribe?: () => void; // Keeping the prop but won't render the button
 }
 
 const AudioPlayer: React.FC<AudioPlayerProps> = ({ audioUrl, onTranscribe }) => {
@@ -17,9 +17,25 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ audioUrl, onTranscribe }) => 
     // Reset audio player when URL changes
     setIsPlaying(false);
     setCurrentTime(0);
+    
+    // Create a new Audio element to properly load and get metadata
+    const audioElement = new Audio(audioUrl);
+    audioElement.addEventListener('loadedmetadata', () => {
+      if (audioRef.current) {
+        audioRef.current.load(); // Reload the audio element
+      }
+    });
+    
+    // Cleanup
+    return () => {
+      audioElement.remove();
+    };
   }, [audioUrl]);
 
   const formatTime = (seconds: number): string => {
+    if (isNaN(seconds) || !isFinite(seconds)) {
+      return "0:00";
+    }
     const minutes = Math.floor(seconds / 60);
     const remainingSeconds = Math.floor(seconds % 60);
     return `${minutes}:${remainingSeconds < 10 ? '0' : ''}${remainingSeconds}`;
@@ -61,7 +77,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ audioUrl, onTranscribe }) => 
   };
 
   const handleProgressBarClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (progressBarRef.current && audioRef.current) {
+    if (progressBarRef.current && audioRef.current && duration > 0) {
       const rect = progressBarRef.current.getBoundingClientRect();
       const pos = (e.clientX - rect.left) / rect.width;
       audioRef.current.currentTime = pos * duration;
@@ -76,9 +92,9 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ audioUrl, onTranscribe }) => 
   };
 
   return (
-    <div className="bg-white rounded-lg p-4 border border-gray-200 shadow-sm">
-      <h3 className="text-lg font-semibold mb-4 text-gray-800">Audio Preview</h3>
-      
+    <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 shadow-sm">
+      <h3 className="text-lg font-semibold mb-4 text-gray-200">Audio Preview</h3>
+
       <audio 
         ref={audioRef}
         src={audioUrl}
@@ -86,38 +102,39 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ audioUrl, onTranscribe }) => 
         onLoadedMetadata={handleLoadedMetadata}
         onEnded={handleAudioEnded}
         className="hidden"
+        preload="metadata"
       />
-      
+
       {/* Time display above progress bar */}
-      <div className="flex justify-between text-xs text-gray-500 mb-1">
+      <div className="flex justify-between text-xs text-gray-400 mb-1">
         <span>{formatTime(currentTime)}</span>
         <span>{formatTime(duration)}</span>
       </div>
-      
+
       {/* Progress bar */}
       <div 
         ref={progressBarRef}
-        className="w-full h-2 bg-gray-200 rounded-full mb-3 cursor-pointer"
+        className="w-full h-2 bg-gray-700 rounded-full mb-3 cursor-pointer"
         onClick={handleProgressBarClick}
       >
         <div 
           className="h-2 bg-blue-600 rounded-full"
-          style={{ width: `${(currentTime / duration) * 100 || 0}%` }}
+          style={{ width: `${((currentTime / duration) * 100) || 0}%` }}
         ></div>
       </div>
-      
+
       {/* Controls */}
       <div className="flex justify-center items-center gap-6 mb-4">
         <button 
           onClick={handleSkipBackward}
-          className="w-10 h-10 flex items-center justify-center text-gray-600 hover:text-blue-600 transition-colors"
+          className="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-blue-400 transition-colors"
         >
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.333 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z"></path>
           </svg>
           <span className="sr-only">Backward 10s</span>
         </button>
-        
+
         <button 
           onClick={handlePlayPause}
           className="w-14 h-14 rounded-full bg-blue-600 flex items-center justify-center text-white hover:bg-blue-700 transition-colors"
@@ -134,10 +151,10 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ audioUrl, onTranscribe }) => 
           )}
           <span className="sr-only">{isPlaying ? 'Pause' : 'Play'}</span>
         </button>
-        
+
         <button 
           onClick={handleSkipForward}
-          className="w-10 h-10 flex items-center justify-center text-gray-600 hover:text-blue-600 transition-colors"
+          className="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-blue-400 transition-colors"
         >
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11.933 12.8a1 1 0 000-1.6L6.6 7.2A1 1 0 005 8v8a1 1 0 001.6.8l5.333-4zM19.933 12.8a1 1 0 000-1.6l-5.333-4A1 1 0 0013 8v8a1 1 0 001.6.8l5.333-4z"></path>
@@ -145,16 +162,8 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ audioUrl, onTranscribe }) => 
           <span className="sr-only">Forward 10s</span>
         </button>
       </div>
-      
-      {/* Transcribe button at the bottom */}
-      {onTranscribe && (
-        <button
-          onClick={onTranscribe}
-          className="w-full py-3 px-5 text-white font-bold rounded-lg transition-all duration-300 bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg"
-        >
-          Transcribe Audio
-        </button>
-      )}
+
+      {/* Removed "Transcribe Audio" button */}
     </div>
   );
 };

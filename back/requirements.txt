@@ -44,3 +44,4 @@ noisereduce
 pyannote.audio 
 openai-whisper
 dotenv
+ffmpeg-python==0.2.0

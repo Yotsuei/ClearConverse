@@ -1,4 +1,3 @@
-// components/Tab.tsx
 import React from 'react';
 
 interface TabProps {
@@ -14,8 +13,8 @@ export const Tab: React.FC<TabProps> = ({ active, onClick, label, icon }) => {
       onClick={onClick}
       className={`flex-1 flex items-center justify-center gap-2 py-3 px-5 font-medium transition-all duration-300 ${
         active 
-          ? 'bg-white text-blue-600 border-t-2 border-blue-600 shadow-sm' 
-          : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+          ? 'bg-gray-700 text-blue-400 border-t-2 border-blue-400 shadow-sm' 
+          : 'bg-gray-800 text-gray-400 hover:bg-gray-750'
       }`}
     >
       <span className="text-xl">{icon}</span>

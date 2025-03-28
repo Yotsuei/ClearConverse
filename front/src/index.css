@@ -4,11 +4,11 @@
 
 @layer base {
   body {
-    @apply bg-gray-50 text-gray-800 font-sans;
+    @apply bg-gray-900 text-gray-200 font-sans;
   }
   
   h1, h2, h3, h4, h5, h6 {
-    @apply font-bold tracking-tight;
+    @apply font-bold tracking-tight text-gray-100;
   }
 }
 
@@ -22,20 +22,30 @@
   }
   
   .btn-secondary {
-    @apply bg-gray-200 text-gray-700 hover:bg-gray-300 active:scale-98 shadow-sm;
+    @apply bg-gray-700 text-gray-200 hover:bg-gray-600 active:scale-98 shadow-sm;
   }
   
   .btn-accent {
-    @apply bg-green-600 text-white hover:bg-green-700 active:scale-98 shadow-sm;
+    @apply bg-indigo-600 text-white hover:bg-indigo-700 active:scale-98 shadow-sm;
   }
   
   .card {
-    @apply bg-white rounded-lg border border-gray-200 shadow-sm p-6;
+    @apply bg-gray-800 rounded-lg border border-gray-700 shadow-sm p-6;
   }
 
   .input {
-    @apply w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500;
+    @apply w-full p-3 border border-gray-600 bg-gray-700 text-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500;
   }
+}
+
+/* Add custom background color between gray-800 and gray-900 */
+.bg-gray-750 {
+  background-color: #202734;
+}
+
+/* Add custom text color that's visible on dark backgrounds */
+.text-gray-250 {
+  color: #e2e8f0;
 }
 
 @keyframes pulse {

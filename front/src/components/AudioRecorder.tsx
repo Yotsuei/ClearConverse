@@ -12,7 +12,8 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
   const [recordingBlob, setRecordingBlob] = useState<Blob | null>(null);
   const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
   const [permission, setPermission] = useState<boolean | null>(null);
-  const [visualizerData, setVisualizerData] = useState<number[]>(Array(50).fill(0));
+  const [visualizerData, setVisualizerData] = useState<number[]>(Array(50).fill(2)); // Initialize with minimal height
+  const [error, setError] = useState<string | null>(null); // Add error state
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -28,24 +29,29 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         setAudioStream(stream);
         setPermission(true);
+        setError(null); // Clear any previous errors
         
         // Set up audio context and analyzer for visualization
         const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
         const analyser = audioContext.createAnalyser();
         analyser.fftSize = 256;
-        const dataArray = new Uint8Array(analyser.frequencyBinCount);
         
         const source = audioContext.createMediaStreamSource(stream);
         source.connect(analyser);
         
         audioContextRef.current = audioContext;
         analyserRef.current = analyser;
-        
-        // Don't connect to destination to avoid feedback loop
-        // source.connect(audioContext.destination);
       } catch (err) {
         console.error('Error accessing microphone:', err);
         setPermission(false);
+        // Display specific error based on the type of error
+        if ((err as Error).name === 'NotAllowedError') {
+          setError('Microphone access was denied. Please allow microphone access in your browser settings.');
+        } else if ((err as Error).name === 'NotFoundError') {
+          setError('No microphone detected. Please connect a microphone and try again.');
+        } else {
+          setError(`Microphone error: ${(err as Error).message || 'Unknown error occurred'}`);
+        }
       }
     };
 
@@ -53,14 +59,35 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
 
     // Cleanup
     return () => {
+      // Stop and clean up MediaRecorder
+      if (mediaRecorderRef.current && isRecording) {
+        try {
+          mediaRecorderRef.current.stop();
+        } catch (err) {
+          console.error("Error stopping MediaRecorder during cleanup:", err);
+        }
+      }
+      
+      // Clean up audio stream
       if (audioStream) {
         audioStream.getTracks().forEach(track => track.stop());
       }
+      
+      // Cancel animation frame if active
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
+      
+      // Clear timer if active
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+      
+      // Close audio context if open
       if (audioContextRef.current) {
-        audioContextRef.current.close();
+        audioContextRef.current.close().catch(err => {
+          console.error("Error closing AudioContext:", err);
+        });
       }
     };
   }, []);
@@ -73,10 +100,27 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
     analyser.getByteFrequencyData(dataArray);
     
-    // Convert the data to a simpler array for visualization
-    const normalizedData = Array.from(dataArray)
-      .slice(0, 50)  // Use only a portion of the frequency data
-      .map(value => value / 255);  // Normalize to 0-1
+    // Get the useful frequency range and distribute it across the full visualizer width
+    // Use the full frequency range instead of just the first half
+    const bars = 50; // Number of visualizer bars
+    const normalizedData = Array(bars).fill(0);
+    
+    // Use the full data range by sampling across the entire spectrum
+    // This ensures we use the full width of the visualizer
+    const usableDataLength = dataArray.length * 0.9; // Use 90% of the frequency data to avoid ultra-high frequencies
+    const binSize = Math.floor(usableDataLength / bars) || 1;
+    
+    for (let i = 0; i < bars; i++) {
+      let sum = 0;
+      // Calculate sampling position to distribute across full spectrum
+      const startBin = Math.floor((i / bars) * usableDataLength);
+      for (let j = 0; j < binSize && startBin + j < dataArray.length; j++) {
+        sum += dataArray[startBin + j];
+      }
+      // Normalize to 0-1 and ensure a minimum height
+      // Increase the scale factor to make bars more visible
+      normalizedData[i] = Math.max(2, (sum / binSize) / 255 * 120);
+    }
     
     setVisualizerData(normalizedData);
     
@@ -84,50 +128,134 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
   };
 
   const startRecording = () => {
-    if (!audioStream) return;
+    if (!audioStream) {
+      setError("No audio stream available. Please refresh and try again.");
+      return;
+    }
 
     audioChunksRef.current = [];
-    const mediaRecorder = new MediaRecorder(audioStream);
-    
-    mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0) {
-        audioChunksRef.current.push(event.data);
+    try {
+      // Determine the best audio format to use based on browser support
+      // Prioritize WAV and MP3 formats since they're directly supported by our backend
+      const preferredFormats = [
+        { mimeType: 'audio/wav', extension: '.wav' },
+        { mimeType: 'audio/mpeg', extension: '.mp3' },
+        { mimeType: 'audio/mp3', extension: '.mp3' },  // Some browsers use this MIME type
+        { mimeType: 'audio/webm', extension: '.wav' }, // Force .wav extension for webm
+        { mimeType: 'audio/ogg', extension: '.wav' }   // Force .wav extension for ogg
+      ];
+      
+      let selectedFormat = null;
+      
+      for (const format of preferredFormats) {
+        if (MediaRecorder.isTypeSupported(format.mimeType)) {
+          selectedFormat = format;
+          console.log(`Using supported recording format: ${format.mimeType}`);
+          break;
+        }
       }
-    };
-    
-    mediaRecorder.onstop = () => {
-      const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
-      setRecordingBlob(audioBlob);
-      onRecordingComplete(audioBlob);
-    };
-    
-    mediaRecorderRef.current = mediaRecorder;
-    mediaRecorder.start();
-    setIsRecording(true);
-    setRecordingTime(0);
-    
-    // Start timer
-    timerRef.current = setInterval(() => {
-      setRecordingTime(prev => prev + 1);
-    }, 1000);
-    
-    // Start visualizer
-    updateVisualizer();
+      
+      if (!selectedFormat) {
+        // If none of the preferred formats are supported, use default
+        selectedFormat = { mimeType: '', extension: '.wav' };
+        console.log("Using default recording format (browser choice) with .wav extension");
+      }
+      
+      // Create MediaRecorder with the selected format if supported
+      const recorderOptions = selectedFormat.mimeType ? 
+        { mimeType: selectedFormat.mimeType } : {};
+        
+      const mediaRecorder = new MediaRecorder(audioStream, recorderOptions);
+      
+      // Log the actual format being used
+      console.log(`MediaRecorder initialized with mimeType: ${mediaRecorder.mimeType}`);
+      
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+      
+      mediaRecorder.onstop = () => {
+        try {
+          if (audioChunksRef.current.length === 0) {
+            throw new Error("No audio data recorded");
+          }
+          
+          // Determine the actual MIME type from the recorder
+          const actualMimeType = mediaRecorder.mimeType || 'audio/webm';
+          console.log(`Recording MIME type: ${actualMimeType}`);
+          
+          // Force .wav or .mp3 extension regardless of the actual MIME type
+          // This ensures backend compatibility even if the browser uses a different format
+          let fileExtension = '.wav'; // Default to .wav
+          if (actualMimeType.includes('mpeg') || actualMimeType.includes('mp3')) {
+            fileExtension = '.mp3';
+          }
+          
+          // Create blob with the correct MIME type
+          const audioBlob = new Blob(audioChunksRef.current, { type: actualMimeType });
+          console.log(`Created audio blob with type: ${audioBlob.type}, size: ${audioBlob.size} bytes, using extension: ${fileExtension}`);
+          
+          // Create file object with the correct extension
+          const fileName = `recording${fileExtension}`;
+          const file = new File([audioBlob], fileName, { type: actualMimeType });
+          
+          // Create object URL for preview
+          const url = URL.createObjectURL(audioBlob);
+          
+          setRecordingBlob(audioBlob);
+          onRecordingComplete(file);
+          setError(null); // Clear any errors on successful recording
+        } catch (err) {
+          console.error("Error finalizing recording:", err);
+          setError(`Recording error: ${(err as Error).message || "Failed to process recording"}`);
+        }
+      };
+
+      mediaRecorder.onerror = (event) => {
+        setError(`Recording error: ${(event as any).error?.message || "Unknown error occurred"}`);
+        stopRecording();
+      };
+      
+      mediaRecorderRef.current = mediaRecorder;
+      mediaRecorder.start();
+      setIsRecording(true);
+      setRecordingTime(0);
+      
+      // Start timer
+      timerRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+      
+      // Start visualizer
+      updateVisualizer();
+    } catch (err) {
+      console.error("Error starting recording:", err);
+      setError(`Couldn't start recording: ${(err as Error).message || "Unknown error"}`);
+    }
   };
 
   const stopRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
+      try {
+        mediaRecorderRef.current.stop();
+      } catch (err) {
+        console.error("Error stopping recording:", err);
+        setError(`Error stopping recording: ${(err as Error).message}`);
+      }
       setIsRecording(false);
       
       // Clear timer
       if (timerRef.current) {
         clearInterval(timerRef.current);
+        timerRef.current = null;
       }
       
       // Stop visualizer
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
       }
     }
   };
@@ -141,28 +269,111 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
   const resetRecording = () => {
     setRecordingBlob(null);
     setRecordingTime(0);
+    setError(null);
+  };
+
+  const retryMicrophoneAccess = () => {
+    // Reset states
+    setPermission(null);
+    setError(null);
+    
+    // Re-request microphone access
+    const getMicrophonePermission = async () => {
+      try {
+        // Close existing streams if any
+        if (audioStream) {
+          audioStream.getTracks().forEach(track => track.stop());
+        }
+        
+        // Stop MediaRecorder if it's running
+        if (mediaRecorderRef.current && isRecording) {
+          try {
+            mediaRecorderRef.current.stop();
+          } catch (err) {
+            console.error("Error stopping MediaRecorder during retry:", err);
+          }
+        }
+        
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        setAudioStream(stream);
+        setPermission(true);
+        
+        // Set up audio context and analyzer for visualization
+        if (audioContextRef.current) {
+          await audioContextRef.current.close();
+        }
+        
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+        
+        const source = audioContext.createMediaStreamSource(stream);
+        source.connect(analyser);
+        
+        audioContextRef.current = audioContext;
+        analyserRef.current = analyser;
+      } catch (err) {
+        console.error('Error accessing microphone:', err);
+        setPermission(false);
+        setError(`Microphone error: ${(err as Error).message || 'Unknown error'}`);
+      }
+    };
+
+    getMicrophonePermission();
   };
 
   return (
     <div className="flex flex-col items-center">
-      {permission === false && (
-        <div className="bg-red-100 text-red-700 p-4 rounded-lg mb-4 w-full">
+      <h2 className="text-xl font-bold text-gray-200 mb-4">Record Audio</h2>
+      <p className="text-gray-400 mb-6 text-center">
+        Record audio directly from your microphone and transcribe it instantly.
+      </p>
+      
+      {/* Error alert */}
+      {error && (
+        <div className="bg-red-900 text-red-200 p-4 rounded-lg mb-4 w-full border border-red-700">
+          <p className="font-medium flex items-center">
+            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+            </svg>
+            Recording Error
+          </p>
+          <p className="text-sm mt-1">{error}</p>
+          <button 
+            onClick={retryMicrophoneAccess}
+            className="mt-2 px-4 py-1 bg-red-800 hover:bg-red-700 text-red-100 rounded text-sm"
+          >
+            Retry Microphone Access
+          </button>
+        </div>
+      )}
+      
+      {permission === false && !error && (
+        <div className="bg-red-900 text-red-200 p-4 rounded-lg mb-4 w-full border border-red-700">
           <p className="font-medium">Microphone access denied</p>
           <p className="text-sm">Please allow microphone access to use this feature.</p>
+          <button 
+            onClick={retryMicrophoneAccess}
+            className="mt-2 px-4 py-1 bg-red-800 hover:bg-red-700 text-red-100 rounded text-sm"
+          >
+            Retry Microphone Access
+          </button>
         </div>
       )}
       
       {permission && (
         <>
           {/* Audio Visualizer */}
-          <div className="w-full h-20 mb-6 bg-gray-100 rounded-lg overflow-hidden flex items-end">
+          <div className="w-full h-20 mb-6 bg-gray-800 rounded-lg overflow-hidden flex items-end justify-between border border-gray-700">
             {visualizerData.map((value, index) => (
               <div 
                 key={index}
                 className={`w-1 mx-px ${isRecording ? 'bg-red-500' : 'bg-blue-500'} rounded-t transition-all duration-75`} 
                 style={{ 
-                  height: `${Math.max(4, value * 100)}%`,
-                  opacity: isRecording ? 1 : 0.5
+                  height: `${value}%`,
+                  opacity: isRecording ? 1 : 0.5,
+                  minWidth: '1.5%', // Ensure bars have minimum width to fill container
+                  flexGrow: 1     // Allow bars to grow to fill the space
                 }}
               ></div>
             ))}
@@ -170,11 +381,11 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
           
           {/* Recording Timer */}
           <div className="mb-6 text-center">
-            <p className={`text-2xl font-bold ${isRecording ? 'text-red-600' : 'text-gray-700'}`}>
+            <p className={`text-2xl font-bold ${isRecording ? 'text-red-400' : 'text-gray-300'}`}>
               {formatTime(recordingTime)}
             </p>
             {isRecording && (
-              <p className="text-red-600 text-sm animate-pulse">Recording...</p>
+              <p className="text-red-400 text-sm animate-pulse">Recording...</p>
             )}
           </div>
           
@@ -192,7 +403,7 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
             ) : (
               <button
                 onClick={stopRecording}
-                className="w-16 h-16 bg-gray-700 hover:bg-gray-800 rounded-full flex items-center justify-center shadow-lg transition-all"
+                className="w-16 h-16 bg-gray-600 hover:bg-gray-700 rounded-full flex items-center justify-center shadow-lg transition-all"
               >
                 <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                   <rect x="8" y="8" width="8" height="8"></rect>
@@ -203,7 +414,7 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
             {recordingBlob && !isRecording && (
               <button
                 onClick={resetRecording}
-                className="w-12 h-12 bg-gray-200 hover:bg-gray-300 rounded-full flex items-center justify-center shadow-sm transition-all text-gray-600"
+                className="w-12 h-12 bg-gray-700 hover:bg-gray-600 rounded-full flex items-center justify-center shadow-sm transition-all text-gray-300"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
@@ -212,21 +423,34 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onRecordingComplete, onTr
             )}
           </div>
           
-          {recordingBlob && !isRecording && (
+          {recordingBlob && !isRecording && onTranscribe && (
             <div className="mt-6 text-center w-full">
-              <p className="text-green-600 font-medium mb-2">Recording complete!</p>
+              <p className="text-green-400 font-medium mb-2">Recording complete!</p>
               
-              {/* Added transcribe button after recording is complete */}
-              {onTranscribe && (
-                <button
-                  onClick={onTranscribe}
-                  className="w-full py-3 px-5 mt-2 text-white font-bold rounded-lg transition-all duration-300 bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg"
-                >
-                  Transcribe Recording
-                </button>
-              )}
+              <button
+                onClick={onTranscribe}
+                className="w-full py-3 px-5 mt-2 text-white font-bold rounded-lg transition-all duration-300 bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg"
+              >
+                Transcribe Recording
+              </button>
             </div>
           )}
+          
+          {/* Recording tips */}
+          <div className="mt-6 bg-gray-700 p-4 rounded-lg text-sm border border-gray-600 w-full">
+            <h3 className="font-semibold text-gray-200 mb-2 flex items-center">
+              <svg className="w-5 h-5 mr-2 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+              Recording Tips
+            </h3>
+            <ul className="list-disc list-inside text-gray-300 space-y-1">
+              <li>Speak clearly and at a moderate pace</li>
+              <li>Minimize background noise for better results</li>
+              <li>Keep the microphone at a consistent distance</li>
+              <li>Recordings are automatically converted to MP3 or WAV format for processing</li>
+            </ul>
+          </div>
         </>
       )}
     </div>
