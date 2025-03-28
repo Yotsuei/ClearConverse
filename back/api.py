@@ -658,16 +658,25 @@ def update_progress(task_id: str, percent: int, message: str):
 
 async def process_audio_with_progress(task_id: str, file_path: str):
     try:
-        # Use a task-specific output folder.
         task_output_dir = os.path.join(OUTPUT_DIR, task_id)
-        processor.run(file_path, output_dir=task_output_dir, debug_mode=False, progress_callback=lambda p, m: update_progress(task_id, p, m))
+        processor.run(
+            file_path, 
+            output_dir=task_output_dir, 
+            debug_mode=False, 
+            progress_callback=lambda p, m: update_progress(task_id, p, m)
+        )
         result_store[task_id] = {"download_url": f"/download/{task_id}/transcript.txt"}
     except Exception as e:
         update_progress(task_id, 100, f"Error: {str(e)}")
         result_store[task_id] = {"error": str(e)}
+    finally:
+        # Ensure the temporary file is removed after processing
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            logging.info(f"Removed temporary file: {file_path}")
 
-@app.post("/transcribe_async", summary="Upload an audio file and process asynchronously with progress updates")
-async def transcribe_audio_async(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
+@app.post("/transcribe")
+async def transcribe_audio(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
     if not file.filename.endswith((".mp3", ".wav")):
         raise HTTPException(status_code=400, detail="Invalid file type. Only MP3 and WAV files are accepted.")
     try:
@@ -682,10 +691,10 @@ async def transcribe_audio_async(file: UploadFile = File(...), background_tasks:
         background_tasks.add_task(process_audio_with_progress, task_id, str(temp_file_path))
         return JSONResponse(content={"task_id": task_id})
     except Exception as e:
-        logging.error(f"Error in /transcribe_async endpoint: {e}")
+        logging.error(f"Error in /transcribe endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.websocket("/ws/progress/{task_id}", summary="WebSocket endpoint for progress updates")
+@app.websocket("/ws/progress/{task_id}")
 async def progress_ws(websocket: WebSocket, task_id: str):
     await websocket.accept()
     try:
@@ -700,29 +709,7 @@ async def progress_ws(websocket: WebSocket, task_id: str):
     finally:
         await websocket.close()
 
-@app.post("/transcribe", summary="Upload an audio file and get the transcript synchronously")
-async def transcribe_audio(file: UploadFile = File(...)):
-    if not file.filename.endswith((".mp3", ".wav")):
-        raise HTTPException(status_code=400, detail="Invalid file type. Only MP3 and WAV files are accepted.")
-    try:
-        temp_dir = Path("temp_uploads")
-        temp_dir.mkdir(exist_ok=True)
-        temp_file_path = temp_dir / file.filename
-        with open(temp_file_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
-        # For synchronous mode, create a unique task folder for temporary storage.
-        task_id = str(uuid.uuid4())
-        task_output_dir = os.path.join(OUTPUT_DIR, task_id)
-        audio_path, transcript, transcript_file_path = processor.run(str(temp_file_path), output_dir=task_output_dir, debug_mode=False)
-        os.remove(temp_file_path)
-        download_url = f"/download/{task_id}/transcript.txt"
-        return JSONResponse(content={"audio_file": audio_path, "transcript": transcript, "download_url": download_url})
-    except Exception as e:
-        logging.error(f"Error in /transcribe endpoint: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/download/{file_path:path}", summary="Download the transcript TXT file")
+@app.get("/download/{file_path:path}")
 async def download_transcript(file_path: str):
     transcript_path = Path(OUTPUT_DIR) / file_path
     if not transcript_path.exists():
@@ -730,7 +717,7 @@ async def download_transcript(file_path: str):
     return FileResponse(path=str(transcript_path), media_type="text/plain", filename=transcript_path.name)
 
 # New cleanup endpoint to remove the temporary processed_audio folder for a given task.
-@app.delete("/cleanup/{task_id}", summary="Clean up temporary processed files for a given task")
+@app.delete("/cleanup/{task_id}")
 async def cleanup(task_id: str):
     task_folder = Path(OUTPUT_DIR) / task_id
     if task_folder.exists() and task_folder.is_dir():
