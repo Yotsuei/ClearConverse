@@ -576,14 +576,37 @@ class EnhancedAudioProcessor:
                                     transcription=transcription['text'],
                                     confidence=1.0
                                 ))
-                        else:
-                            transcription = self.whisper_model.transcribe(
-                                audio_segment.squeeze().cpu().numpy(),
-                                initial_prompt="This is a conversation between two people.",
-                                word_timestamps=True,
-                                condition_on_previous_text=self.config.condition_on_previous_text,
-                                temperature=self.config.temperature
-                            )
+                                meta_counts[final_label] = meta_counts.get(final_label, 0) + 1
+                            continue
+                if is_overlap:
+                    mapped_profiles = {speaker_mapping.get(k, k): v for k, v in speaker_embeddings.items()}
+                    refined_results = self._process_overlap_segment(
+                        audio_segment,
+                        speaker_embeddings=mapped_profiles,
+                        involved_speakers=[speaker_mapping.get(s, s) for s in involved_speakers],
+                        seg_start=seg_start,
+                        seg_end=seg_end
+                    )
+                    for result in refined_results:
+                        final_label = result['speaker_id']
+                        processed_segments.append(AudioSegment(
+                            start=seg_start,
+                            end=seg_end,
+                            speaker_id=final_label,
+                            audio_tensor=result['audio'],
+                            is_overlap=True,
+                            transcription=result['transcription'],
+                            confidence=result.get('confidence', 0.5),
+                            metadata={'overlap_speakers': involved_speakers}
+                        ))
+                else:
+                    transcription = self.whisper_model.transcribe(
+                        audio_segment.squeeze().cpu().numpy(),
+                        initial_prompt="This is a conversation between two people.",
+                        word_timestamps=True,
+                        condition_on_previous_text=self.config.condition_on_previous_text,
+                        temperature=self.config.temperature
+                    )
                     processed_segments.append(AudioSegment(
                         start=seg_start,
                         end=seg_end,
@@ -593,6 +616,7 @@ class EnhancedAudioProcessor:
                         transcription=transcription['text'],
                         confidence=1.0
                     ))
+                    meta_counts[spk_label] += 1
             processed_segments.sort(key=lambda x: x.start)
             metadata = {
                 'duration': audio_duration,
@@ -601,6 +625,104 @@ class EnhancedAudioProcessor:
                 'total_segments': len(processed_segments),
                 'speakers': list(speaker_mapping.values())
             }
+            return {'segments': processed_segments, 'metadata': metadata}
+        except Exception as e:
+            logging.error(f"Error in process_file: {e}")
+            traceback.print_exc()
+            raise
+
+    def save_segments(self, segments: List[AudioSegment], output_dir: str):
+        output_dir = Path(output_dir)
+        regular_dir = output_dir / "regular_segments"
+        overlap_dir = output_dir / "overlap_segments"
+        regular_dir.mkdir(parents=True, exist_ok=True)
+        overlap_dir.mkdir(parents=True, exist_ok=True)
+        for segment in segments:
+            timestamp = f"{segment.start:.2f}-{segment.end:.2f}"
+            if segment.is_overlap:
+                filename = f"overlap_{timestamp}_{segment.speaker_id}.wav"
+                save_path = overlap_dir / filename
+            else:
+                filename = f"{timestamp}_{segment.speaker_id}.wav"
+                save_path = regular_dir / filename
+            torchaudio.save(str(save_path), segment.audio_tensor.cpu(), self.config.target_sample_rate)
+            logging.info(f"Saved segment: {save_path}")
+
+    def save_debug_segments(self, segments: List[AudioSegment], output_dir: str):
+        debug_dir = Path(output_dir) / "debug_segments"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        metadata = []
+        for idx, segment in enumerate(segments):
+            segment_id = f"segment_{idx:03d}"
+            segment_type = "overlap" if segment.is_overlap else "regular"
+            segment_dir = debug_dir / segment_type
+            segment_dir.mkdir(exist_ok=True)
+            audio_filename = f"{segment_id}.wav"
+            torchaudio.save(str(segment_dir / audio_filename), segment.audio_tensor.cpu(), self.config.target_sample_rate)
+            segment_metadata = {
+                "segment_id": segment_id,
+                "start_time": f"{segment.start:.3f}",
+                "end_time": f"{segment.end:.3f}",
+                "duration": f"{segment.end - segment.start:.3f}",
+                "speaker_id": segment.speaker_id,
+                "is_overlap": segment.is_overlap,
+                "transcription": segment.transcription,
+                "audio_file": str(segment_dir / audio_filename),
+                "audio_stats": {
+                    "max_amplitude": float(torch.max(torch.abs(segment.audio_tensor)).cpu()),
+                    "mean_amplitude": float(torch.mean(torch.abs(segment.audio_tensor)).cpu()),
+                    "samples": segment.audio_tensor.shape[-1]
+                }
+            }
+            metadata.append(segment_metadata)
+            with open(segment_dir / f"{segment_id}_info.txt", "w") as f:
+                f.write(f"Segment ID: {segment_id}\n")
+                f.write(f"Time: {segment.start:.3f}s - {segment.end:.3f}s\n")
+                f.write(f"Speaker: {segment.speaker_id}\n")
+                f.write(f"Overlap: {segment.is_overlap}\n")
+                f.write(f"Transcription: {segment.transcription}\n")
+        with open(debug_dir / "segments_metadata.json", "w") as f:
+            json.dump(metadata, f, indent=2)
+        logging.info(f"Debug segments saved to: {debug_dir}")
+        logging.info(f"Total segments: {len(segments)}")
+        logging.info(f"Overlap segments: {sum(1 for s in segments if s.is_overlap)}")
+        logging.info(f"Regular segments: {sum(1 for s in segments if not s.is_overlap)}")
+
+    def run(self, input_file, output_dir: str = "processed_audio", debug_mode: bool = False, progress_callback=None):
+        try:
+            if progress_callback:
+                progress_callback(5, "Starting processing")
+            # In temporary mode, use the provided output_dir (which should be task-specific)
+            os.makedirs(output_dir, exist_ok=True)
+            logging.info(f"Processing file: {input_file}")
+            
+            if progress_callback:
+                progress_callback(30, "Running file processing")
+            results = self.process_file(input_file)
+            
+            if progress_callback:
+                progress_callback(60, "Saving processed segments")
+            self.save_segments(results['segments'], output_dir)
+            if debug_mode:
+                self.save_debug_segments(results['segments'], output_dir)
+            if progress_callback:
+                progress_callback(80, "Saving transcript")
+            transcript_path = os.path.join(output_dir, "transcript.txt")
+            transcript = ""
+            for segment in results['segments']:
+                transcript += f"[{segment.speaker_id}] {segment.start:.2f}s - {segment.end:.2f}s\n"
+                transcript += f"{segment.transcription}\n\n"
+            with open(transcript_path, "w", encoding='utf-8') as f:
+                f.write(transcript)
+            logging.info(f"Transcript saved to: {transcript_path}")
+            if progress_callback:
+                progress_callback(100, "Processing completed")
+            return input_file, transcript, transcript_path
+        except Exception as e:
+            logging.error(f"Error during processing: {e}")
+            traceback.print_exc()
+            raise
+        
 # =============================================================================
 # FastAPI App and Endpoints
 # =============================================================================
