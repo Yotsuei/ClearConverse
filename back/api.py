@@ -839,6 +839,8 @@ async def process_url_with_progress(task_id: str, url: str):
                 os.remove(temp_file_path)
                 logging.info(f"Removed temporary file: {temp_file_path}")
             except Exception as e:
+                logging.error(f"Error in url processing : {e}")
+                raise HTTPException(status_code=500, detail=str(e))
 @app.post("/transcribe")
 async def transcribe_audio(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
     if not file.filename.endswith((".mp3", ".wav")):
