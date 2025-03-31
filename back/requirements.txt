@@ -47,3 +47,12 @@ dotenv
 ffmpeg-python
 apscheduler
 websockets
+# URL handling and validation
+validators==0.22.0
+requests==2.31.0
+
+# FFmpeg Python wrapper for better integration
+ffmpeg-python==0.2.0
+
+# Update the dotenv line to correctly specify the package
+python-dotenv==1.0.0

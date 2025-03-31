@@ -295,24 +295,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
           Cancel Upload
         </button>
       )}
-      
-      {/* File format explanation */}
-      <div className="mt-6 bg-gray-700 p-4 rounded-lg text-sm border border-gray-600 w-full">
-        <h3 className="font-semibold text-gray-200 mb-2 flex items-center">
-          <svg className="w-5 h-5 mr-2 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-          </svg>
-          Supported File Formats
-        </h3>
-        <ul className="list-disc list-inside text-gray-300 space-y-1">
-          <li><span className="font-medium text-green-400">.wav</span> - Waveform Audio Format (recommended)</li>
-          <li><span className="font-medium text-green-400">.mp3</span> - MP3 Audio Format (recommended)</li>
-          <li><span className="font-medium text-gray-400">.mp4</span> - MPEG-4 Video (audio will be extracted)</li>
-          <li><span className="font-medium text-gray-400">.webm</span> - WebM Audio/Video (may require conversion)</li>
-          <li><span className="font-medium text-gray-400">.ogg</span> - Ogg Vorbis Audio (may require conversion)</li>
-        </ul>
-        <p className="mt-2 text-gray-400">For best results, use WAV or MP3 files with clear audio and minimal background noise. Other formats may cause processing errors.</p>
-      </div>
+
     </div>
   );
 };

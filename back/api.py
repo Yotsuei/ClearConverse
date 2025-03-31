@@ -6,7 +6,7 @@ import logging
 import traceback
 import uuid
 import asyncio
-from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, BackgroundTasks, Form
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
@@ -29,13 +29,21 @@ from typing import Any, Dict, List, Optional, Tuple
 from pyannote.audio import Pipeline, Inference
 from speechbrain.inference import SepformerSeparation
 
+# Add these imports for URL handling
+import requests
+import tempfile
+import platform
+import subprocess
+from urllib.parse import urlparse
+import validators
+
 # =============================================================================
 # Logging setup
 # =============================================================================
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 # =============================================================================
-# Data Classes and Utility Functions (Same as your pipeline)
+# Data Classes and Utility Functions
 # =============================================================================
 
 @dataclass
@@ -144,8 +152,123 @@ def enhance_audio(audio: torch.Tensor, sample_rate: int, stationary: bool = True
         audio_np = audio_np / np.max(np.abs(audio_np))
     return torch.tensor(audio_np, dtype=torch.float32)
 
+# URL handling utility functions
+def is_ffmpeg_installed():
+    """Check if ffmpeg is installed and available in PATH."""
+    try:
+        # Check differently based on platform
+        if platform.system() == "Windows":
+            # For Windows
+            subprocess.run(['where', 'ffmpeg'], check=True, capture_output=True)
+        else:
+            # For Unix/Linux/MacOS
+            subprocess.run(['which', 'ffmpeg'], check=True, capture_output=True)
+        return True
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return False
+        
+def download_file_from_url(url, output_path=None):
+    """
+    Download a file from a URL and save it to a temporary file if output_path is not provided.
+    Returns the path to the downloaded file.
+    """
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        response = requests.get(url, headers=headers, stream=True, timeout=30)
+        response.raise_for_status()  # Raise an exception for HTTP errors
+        
+        # Determine content type from headers
+        content_type = response.headers.get('Content-Type', '')
+        
+        if not output_path:
+            # Determine file extension from content type or URL
+            file_ext = '.mp3'  # Default extension
+            if 'audio/wav' in content_type:
+                file_ext = '.wav'
+            elif 'audio/mpeg' in content_type or 'audio/mp3' in content_type:
+                file_ext = '.mp3'
+            elif 'audio/ogg' in content_type:
+                file_ext = '.ogg'
+            elif 'video/mp4' in content_type:
+                file_ext = '.mp4'
+            else:
+                # Try to get extension from URL
+                parsed_url = urlparse(url)
+                path = parsed_url.path
+                if '.' in path:
+                    url_ext = path.split('.')[-1].lower()
+                    if url_ext in ['mp3', 'wav', 'ogg', 'mp4']:
+                        file_ext = f'.{url_ext}'
+            
+            # Create a temporary file with the determined extension
+            temp_file = tempfile.NamedTemporaryFile(suffix=file_ext, delete=False)
+            output_path = temp_file.name
+            temp_file.close()
+        
+        # Save the file content
+        with open(output_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        
+        logging.info(f"Downloaded file from {url} to {output_path}")
+        return output_path
+    
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error downloading file from URL {url}: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Failed to download file from URL: {str(e)}")
+    except Exception as e:
+        logging.error(f"Unexpected error downloading file from URL {url}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Server error processing URL: {str(e)}")
+
+def validate_url(url):
+    """Validate if the URL is well-formed and accessible."""
+    # Check if URL is well-formed
+    if not validators.url(url):
+        raise HTTPException(status_code=400, detail="Invalid URL format")
+    
+    # Try a HEAD request to check if the URL is accessible
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.head(url, headers=headers, timeout=10)
+        
+        # Check if response indicates success (status code 2xx)
+        if not response.ok:
+            raise HTTPException(status_code=400, 
+                               detail=f"URL returned status code {response.status_code}. Make sure the URL is publicly accessible.")
+        
+        # Check if content type suggests audio or video
+        content_type = response.headers.get('Content-Type', '').lower()
+        valid_types = ['audio/', 'video/']
+        
+        is_valid_content = any(t in content_type for t in valid_types)
+        
+        # If we can't determine from content-type, check URL extension
+        if not is_valid_content:
+            parsed_url = urlparse(url)
+            path = parsed_url.path.lower()
+            valid_extensions = ['.mp3', '.wav', '.ogg', '.mp4', '.flac', '.m4a', '.aac']
+            is_valid_content = any(path.endswith(ext) for ext in valid_extensions)
+        
+        if not is_valid_content:
+            logging.warning(f"URL may not point to audio/video content: {content_type}")
+            # Just log a warning, don't raise an exception, as content-type might be misleading
+    
+    except requests.exceptions.Timeout:
+        raise HTTPException(status_code=400, detail="URL request timed out. Server might be slow or unreachable.")
+    except requests.exceptions.ConnectionError:
+        raise HTTPException(status_code=400, detail="Failed to connect to the URL. Please check if the URL is correct and the server is running.")
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=400, detail=f"Error validating URL: {str(e)}")
+    
+    return True
+
 # =============================================================================
-# EnhancedAudioProcessor Class (Same as provided)
+# EnhancedAudioProcessor Class 
 # =============================================================================
 
 class EnhancedAudioProcessor:
@@ -453,30 +576,7 @@ class EnhancedAudioProcessor:
                                     transcription=transcription['text'],
                                     confidence=1.0
                                 ))
-                                meta_counts[final_label] = meta_counts.get(final_label, 0) + 1
-                            continue
-                if is_overlap:
-                    mapped_profiles = {speaker_mapping.get(k, k): v for k, v in speaker_embeddings.items()}
-                    refined_results = self._process_overlap_segment(
-                        audio_segment,
-                        speaker_embeddings=mapped_profiles,
-                        involved_speakers=[speaker_mapping.get(s, s) for s in involved_speakers],
-                        seg_start=seg_start,
-                        seg_end=seg_end
-                    )
-                    for result in refined_results:
-                        final_label = result['speaker_id']
-                        processed_segments.append(AudioSegment(
-                            start=seg_start,
-                            end=seg_end,
-                            speaker_id=final_label,
-                            audio_tensor=result['audio'],
-                            is_overlap=True,
-                            transcription=result['transcription'],
-                            confidence=result.get('confidence', 0.5),
-                            metadata={'overlap_speakers': involved_speakers}
-                        ))
-                else:
+                        else:
                     transcription = self.whisper_model.transcribe(
                         audio_segment.squeeze().cpu().numpy(),
                         initial_prompt="This is a conversation between two people.",
@@ -493,7 +593,6 @@ class EnhancedAudioProcessor:
                         transcription=transcription['text'],
                         confidence=1.0
                     ))
-                    meta_counts[spk_label] += 1
             processed_segments.sort(key=lambda x: x.start)
             metadata = {
                 'duration': audio_duration,
@@ -502,104 +601,6 @@ class EnhancedAudioProcessor:
                 'total_segments': len(processed_segments),
                 'speakers': list(speaker_mapping.values())
             }
-            return {'segments': processed_segments, 'metadata': metadata}
-        except Exception as e:
-            logging.error(f"Error in process_file: {e}")
-            traceback.print_exc()
-            raise
-
-    def save_segments(self, segments: List[AudioSegment], output_dir: str):
-        output_dir = Path(output_dir)
-        regular_dir = output_dir / "regular_segments"
-        overlap_dir = output_dir / "overlap_segments"
-        regular_dir.mkdir(parents=True, exist_ok=True)
-        overlap_dir.mkdir(parents=True, exist_ok=True)
-        for segment in segments:
-            timestamp = f"{segment.start:.2f}-{segment.end:.2f}"
-            if segment.is_overlap:
-                filename = f"overlap_{timestamp}_{segment.speaker_id}.wav"
-                save_path = overlap_dir / filename
-            else:
-                filename = f"{timestamp}_{segment.speaker_id}.wav"
-                save_path = regular_dir / filename
-            torchaudio.save(str(save_path), segment.audio_tensor.cpu(), self.config.target_sample_rate)
-            logging.info(f"Saved segment: {save_path}")
-
-    def save_debug_segments(self, segments: List[AudioSegment], output_dir: str):
-        debug_dir = Path(output_dir) / "debug_segments"
-        debug_dir.mkdir(parents=True, exist_ok=True)
-        metadata = []
-        for idx, segment in enumerate(segments):
-            segment_id = f"segment_{idx:03d}"
-            segment_type = "overlap" if segment.is_overlap else "regular"
-            segment_dir = debug_dir / segment_type
-            segment_dir.mkdir(exist_ok=True)
-            audio_filename = f"{segment_id}.wav"
-            torchaudio.save(str(segment_dir / audio_filename), segment.audio_tensor.cpu(), self.config.target_sample_rate)
-            segment_metadata = {
-                "segment_id": segment_id,
-                "start_time": f"{segment.start:.3f}",
-                "end_time": f"{segment.end:.3f}",
-                "duration": f"{segment.end - segment.start:.3f}",
-                "speaker_id": segment.speaker_id,
-                "is_overlap": segment.is_overlap,
-                "transcription": segment.transcription,
-                "audio_file": str(segment_dir / audio_filename),
-                "audio_stats": {
-                    "max_amplitude": float(torch.max(torch.abs(segment.audio_tensor)).cpu()),
-                    "mean_amplitude": float(torch.mean(torch.abs(segment.audio_tensor)).cpu()),
-                    "samples": segment.audio_tensor.shape[-1]
-                }
-            }
-            metadata.append(segment_metadata)
-            with open(segment_dir / f"{segment_id}_info.txt", "w") as f:
-                f.write(f"Segment ID: {segment_id}\n")
-                f.write(f"Time: {segment.start:.3f}s - {segment.end:.3f}s\n")
-                f.write(f"Speaker: {segment.speaker_id}\n")
-                f.write(f"Overlap: {segment.is_overlap}\n")
-                f.write(f"Transcription: {segment.transcription}\n")
-        with open(debug_dir / "segments_metadata.json", "w") as f:
-            json.dump(metadata, f, indent=2)
-        logging.info(f"Debug segments saved to: {debug_dir}")
-        logging.info(f"Total segments: {len(segments)}")
-        logging.info(f"Overlap segments: {sum(1 for s in segments if s.is_overlap)}")
-        logging.info(f"Regular segments: {sum(1 for s in segments if not s.is_overlap)}")
-
-    def run(self, input_file, output_dir: str = "processed_audio", debug_mode: bool = False, progress_callback=None):
-        try:
-            if progress_callback:
-                progress_callback(5, "Starting processing")
-            # In temporary mode, use the provided output_dir (which should be task-specific)
-            os.makedirs(output_dir, exist_ok=True)
-            logging.info(f"Processing file: {input_file}")
-            
-            if progress_callback:
-                progress_callback(30, "Running file processing")
-            results = self.process_file(input_file)
-            
-            if progress_callback:
-                progress_callback(60, "Saving processed segments")
-            self.save_segments(results['segments'], output_dir)
-            if debug_mode:
-                self.save_debug_segments(results['segments'], output_dir)
-            if progress_callback:
-                progress_callback(80, "Saving transcript")
-            transcript_path = os.path.join(output_dir, "transcript.txt")
-            transcript = ""
-            for segment in results['segments']:
-                transcript += f"[{segment.speaker_id}] {segment.start:.2f}s - {segment.end:.2f}s\n"
-                transcript += f"{segment.transcription}\n\n"
-            with open(transcript_path, "w", encoding='utf-8') as f:
-                f.write(transcript)
-            logging.info(f"Transcript saved to: {transcript_path}")
-            if progress_callback:
-                progress_callback(100, "Processing completed")
-            return input_file, transcript, transcript_path
-        except Exception as e:
-            logging.error(f"Error during processing: {e}")
-            traceback.print_exc()
-            raise
-
 # =============================================================================
 # FastAPI App and Endpoints
 # =============================================================================
@@ -675,6 +676,47 @@ async def process_audio_with_progress(task_id: str, file_path: str):
             os.remove(file_path)
             logging.info(f"Removed temporary file: {file_path}")
 
+async def process_url_with_progress(task_id: str, url: str):
+    """Process audio from URL with progress updates."""
+    temp_file_path = None
+    try:
+        # Update progress - downloading
+        update_progress(task_id, 10, "Downloading file from URL")
+        
+        # Download file from URL
+        temp_file_path = download_file_from_url(url)
+        
+        # Update progress - downloaded
+        update_progress(task_id, 30, "File downloaded, starting transcription")
+        
+        # Set up output directory for this task
+        task_output_dir = os.path.join(OUTPUT_DIR, task_id)
+        
+        # Process the audio file
+        processor.run(
+            temp_file_path, 
+            output_dir=task_output_dir, 
+            debug_mode=False, 
+            progress_callback=lambda p, m: update_progress(task_id, 30 + int(p * 0.7), m)
+        )
+        
+        # Final update and store result
+        update_progress(task_id, 100, "Transcription complete")
+        result_store[task_id] = {"download_url": f"/download/{task_id}/transcript.txt"}
+    
+    except Exception as e:
+        update_progress(task_id, 100, f"Error: {str(e)}")
+        result_store[task_id] = {"error": str(e)}
+        logging.error(f"Error processing URL {url}: {e}")
+        traceback.print_exc()
+    
+    finally:
+        # Clean up temporary file
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+                logging.info(f"Removed temporary file: {temp_file_path}")
+            except Exception as e:
 @app.post("/transcribe")
 async def transcribe_audio(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
     if not file.filename.endswith((".mp3", ".wav")):
@@ -693,6 +735,14 @@ async def transcribe_audio(file: UploadFile = File(...), background_tasks: Backg
     except Exception as e:
         logging.error(f"Error in /transcribe endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/task/{task_id}/result")
+async def get_task_result(task_id: str):
+    """Get the result of a completed task."""
+    if task_id not in result_store:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+    
+    return JSONResponse(content=result_store[task_id])
 
 @app.websocket("/ws/progress/{task_id}")
 async def progress_ws(websocket: WebSocket, task_id: str):
@@ -728,3 +778,25 @@ async def cleanup(task_id: str):
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+    if is_overlap:
+        mapped_profiles = {speaker_mapping.get(k, k): v for k, v in speaker_embeddings.items()}
+        refined_results = self._process_overlap_segment(
+        audio_segment,
+        speaker_embeddings=mapped_profiles,
+        involved_speakers=[speaker_mapping.get(s, s) for s in involved_speakers],
+        seg_start=seg_start,
+        seg_end=seg_end
+        )
+    for result in refined_results:
+        final_label = result['speaker_id']
+        processed_segments.append(AudioSegment(
+            start=seg_start,
+            end=seg_end,
+            speaker_id=final_label,
+            audio_tensor=result['audio'],
+            is_overlap=True,
+            transcription=result['transcription'],
+            confidence=result.get('confidence', 0.5),
+            metadata={'overlap_speakers': involved_speakers}
+        ))
+        meta_counts[final_label] = meta_counts.get(final_label, 0) + 1

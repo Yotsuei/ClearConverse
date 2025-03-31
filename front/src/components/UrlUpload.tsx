@@ -1,5 +1,6 @@
-// components/UrlUpload.tsx
-import React, { useState } from 'react';
+// Updated UrlUpload.tsx with real backend integration
+
+import React, { useState, useEffect } from 'react';
 
 interface UrlUploadProps {
   onFileSelected: (file: File) => void;
@@ -24,8 +25,10 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
   const [isValidUrl, setIsValidUrl] = useState<boolean>(false);
   const [urlError, setUrlError] = useState<string | null>(null);
   const [uploadXhr, setUploadXhr] = useState<XMLHttpRequest | null>(null);
+  const [taskId, setTaskId] = useState<string | null>(null);
+  const [wsConnection, setWsConnection] = useState<WebSocket | null>(null);
 
-  // Handle URL input change
+  // Basic URL validation
   const handleUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const inputUrl = e.target.value;
     setUrl(inputUrl);
@@ -39,14 +42,21 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
         // Check if it's a valid URL format
         new URL(inputUrl);
         
-        // Check if it's a Google Drive URL
-        if (inputUrl.includes('drive.google.com') || 
-            inputUrl.includes('docs.google.com') || 
-            inputUrl.includes('storage.googleapis.com')) {
-          setIsValidUrl(true);
-        } else {
-          setIsValidUrl(false);
-          setUrlError('Please enter a valid Google Drive URL');
+        // Basic URL validation passed
+        setIsValidUrl(true);
+        
+        // Advanced validation can be added here if needed
+        const audioExtensions = ['.mp3', '.wav', '.ogg', '.m4a', '.flac', '.mp4'];
+        const hasAudioExtension = audioExtensions.some(ext => 
+          inputUrl.toLowerCase().endsWith(ext)
+        );
+        
+        if (!hasAudioExtension && 
+            !inputUrl.includes('drive.google.com') && 
+            !inputUrl.includes('dropbox.com') &&
+            !inputUrl.includes('storage.googleapis.com')) {
+          // Just a warning, don't invalidate URL
+          setUrlError('Warning: URL doesn\'t appear to be an audio file or from a recognized service.');
         }
       } catch (e) {
         setIsValidUrl(false);
@@ -63,17 +73,100 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
       setUploadXhr(null);
     }
     
-    // Reset uploading state
+    // Close WebSocket connection if active
+    if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+      wsConnection.close();
+      setWsConnection(null);
+    }
+    
+    // Reset states
+    setTaskId(null);
     setIsUploading(false);
     setUploadProgress(0);
   };
 
+  // Set up WebSocket connection for progress updates
+  useEffect(() => {
+    if (taskId) {
+      const ws = new WebSocket(`ws://localhost:8000/ws/progress/${taskId}`);
+      
+      ws.onopen = () => {
+        console.log(`WebSocket connection established for task ${taskId}`);
+      };
+      
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log("Progress update:", data);
+          
+          // Update progress based on the server message
+          setUploadProgress(data.progress);
+          
+          // If processing is complete
+          if (data.progress >= 100) {
+            setIsUploading(false);
+            
+            // Fetch the result
+            fetch(`http://localhost:8000/task/${taskId}/result`)
+              .then(response => response.json())
+              .then(result => {
+                if (result.error) {
+                  throw new Error(result.error);
+                }
+                
+                // Create a dummy file for audio preview (in a real app, you'd fetch the actual audio)
+                const dummyAudioBlob = new Blob([], { type: 'audio/mp3' });
+                const audioFile = new File([dummyAudioBlob], 'url_audio.mp3', { type: 'audio/mp3' });
+                
+                // Pass results to parent components
+                onFileSelected(audioFile);
+                
+                // Fetch transcript content
+                fetch(`http://localhost:8000${result.download_url}`)
+                  .then(response => response.text())
+                  .then(transcript => {
+                    onUploadResponse(transcript, result.download_url);
+                  });
+              })
+              .catch(error => {
+                console.error("Error fetching results:", error);
+                setUrlError(`Error processing audio: ${error.message}`);
+              })
+              .finally(() => {
+                ws.close();
+              });
+          }
+        } catch (error) {
+          console.error("Error parsing WebSocket message:", error);
+        }
+      };
+      
+      ws.onerror = (error) => {
+        console.error("WebSocket error:", error);
+        setUrlError("Connection error while monitoring progress");
+      };
+      
+      ws.onclose = () => {
+        console.log("WebSocket connection closed");
+      };
+      
+      setWsConnection(ws);
+      
+      // Clean up WebSocket on unmount or when taskId changes
+      return () => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.close();
+        }
+      };
+    }
+  }, [taskId]);
+
   const handleUpload = async () => {
-    // Clear any previous transcription
+    // Clear any previous transcription when uploading
     clearTranscription();
     
     if (!url || !isValidUrl) {
-      setUrlError('Please enter a valid Google Drive URL');
+      setUrlError('Please enter a valid URL');
       return;
     }
     
@@ -85,133 +178,44 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
     formData.append('url', url);
 
     try {
-      // Implement XMLHttpRequest for progress tracking
+      // Use XMLHttpRequest for request handling
       const xhr = new XMLHttpRequest();
-      setUploadXhr(xhr); // Store XHR reference for cancel functionality
+      setUploadXhr(xhr);
       
       xhr.open('POST', 'http://localhost:8000/transcribe-url');
       
-      // Simulate progress for URL processing
-      let simulatedProgress = 0;
-      const progressInterval = setInterval(() => {
-        simulatedProgress += 5;
-        if (simulatedProgress <= 90) {
-          setUploadProgress(simulatedProgress);
-        } else {
-          clearInterval(progressInterval);
-        }
-      }, 300);
-      
       xhr.onload = function() {
         if (xhr.status === 200) {
-          clearInterval(progressInterval);
-          setUploadProgress(100);
-          setIsUploading(false);
-          setUploadXhr(null);
-          startProcessing();
-          
-          // Parse response
+          // Parse response to get task ID
           const response = JSON.parse(xhr.responseText);
-          
-          // Create a File object from the URL for preview purposes
-          // In a real implementation, you would get a temporary file URL from backend
-          const dummyFile = new File([new Blob()], "google_drive_audio.mp3", { type: "audio/mp3" });
-          
-          // For demo purposes we'll create an audio element
-          // In production, you would fetch the actual audio from the server
-          if (response.temp_audio_url) {
-            fetch(response.temp_audio_url)
-              .then(res => res.blob())
-              .then(blob => {
-                const file = new File([blob], "google_drive_audio.mp3", { type: "audio/mp3" });
-                onFileSelected(file);
-                onUploadResponse(response.transcript, response.download_url);
-              })
-              .catch(err => {
-                console.error("Error fetching audio:", err);
-                // Fallback for demo
-                onFileSelected(dummyFile);
-                onUploadResponse(response.transcript, response.download_url);
-              });
+          if (response.task_id) {
+            setTaskId(response.task_id);
+            startProcessing();
           } else {
-            // Fallback for demo or mock
-            onFileSelected(dummyFile);
-            onUploadResponse(response.transcript || "Sample transcription for Google Drive audio.", 
-                             response.download_url || "/download/transcript.txt");
+            throw new Error("Invalid response from server: missing task_id");
           }
         } else {
-          clearInterval(progressInterval);
-          throw new Error(`Error: ${xhr.statusText}`);
+          throw new Error(`Server error: ${xhr.status} ${xhr.statusText}`);
         }
       };
 
       xhr.onerror = function() {
-        clearInterval(progressInterval);
-        setUploadXhr(null);
         throw new Error('Network error occurred');
       };
 
       xhr.onabort = function() {
-        clearInterval(progressInterval);
-        console.log('Upload aborted');
-      };
-
-      // For demo purposes, we'll simulate a server response after a delay
-      // In production, actually send the request
-      setTimeout(() => {
-        // Mock response for demo
-        const mockResponse = {
-          transcript: "This is a sample transcription from Google Drive audio. The transcription would include the full text converted from speech in the actual implementation.",
-          download_url: "/download/transcript.txt",
-          temp_audio_url: null // In real implementation, this would be a temporary URL to the audio file
-        };
-        
-        // Create a blob from the file URL
-        const audioBlob = new Blob([], { type: 'audio/mp3' });
-        const audioFile = new File([audioBlob], 'drive_audio.mp3', { type: 'audio/mp3' });
-        const audioUrl = URL.createObjectURL(audioBlob);
-        
-        onFileSelected(audioFile);
-        onUploadResponse(mockResponse.transcript, mockResponse.download_url);
-        
-        // Clear progress simulation
-        clearInterval(progressInterval);
-        setUploadProgress(100);
+        console.log('URL upload aborted');
         setIsUploading(false);
         setUploadXhr(null);
-        startProcessing();
-      }, 3000);
-      
-      // In production, you would actually send the request
-      // xhr.send(formData);
+      };
+
+      xhr.send(formData);
     } catch (error) {
       console.error('URL upload failed:', error);
-      setUrlError('There was an error processing your URL. Please make sure it\'s accessible.');
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      setUrlError(`Error: ${errorMessage}`);
       setIsUploading(false);
       setUploadXhr(null);
-    }
-  };
-
-  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
-    e.preventDefault();
-    const pastedText = e.clipboardData.getData('text');
-    setUrl(pastedText);
-    
-    // Validate pasted URL
-    try {
-      new URL(pastedText);
-      if (pastedText.includes('drive.google.com') || 
-          pastedText.includes('docs.google.com') || 
-          pastedText.includes('storage.googleapis.com')) {
-        setIsValidUrl(true);
-        setUrlError(null);
-      } else {
-        setIsValidUrl(false);
-        setUrlError('Please enter a valid Google Drive URL');
-      }
-    } catch (e) {
-      setIsValidUrl(false);
-      setUrlError('Please enter a valid URL');
     }
   };
 
@@ -223,18 +227,22 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
 
   return (
     <div className="flex flex-col">
+      <h2 className="text-xl font-bold text-gray-200 mb-4">Audio from URL</h2>
+      <p className="text-gray-400 mb-6 text-center">
+        Enter a direct URL to an audio file for transcription.
+      </p>
+      
       <div className="mb-4">
-        <label htmlFor="drive-url" className="block text-sm font-medium text-gray-300 mb-1">
-          Google Drive Audio URL
+        <label htmlFor="audio-url" className="block text-sm font-medium text-gray-300 mb-1">
+          Audio URL
         </label>
         <div className="relative">
           <input
-            id="drive-url"
+            id="audio-url"
             type="text"
             value={url}
             onChange={handleUrlChange}
-            onPaste={handlePaste}
-            placeholder="https://drive.google.com/file/d/..."
+            placeholder="https://example.com/audio.mp3"
             className={`w-full p-3 pr-10 bg-gray-700 text-gray-200 border rounded-lg focus:outline-none focus:ring-2 ${
               url && !isValidUrl 
                 ? 'border-red-500 focus:ring-red-500 focus:border-red-500' 
@@ -254,10 +262,12 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
           )}
         </div>
         {urlError && (
-          <p className="mt-1 text-sm text-red-400">{urlError}</p>
+          <p className={`mt-1 text-sm ${urlError.startsWith('Warning') ? 'text-yellow-400' : 'text-red-400'}`}>
+            {urlError}
+          </p>
         )}
         <p className="mt-1 text-sm text-gray-400">
-          Paste a link to a Google Drive audio file. Make sure the file is publicly accessible.
+          Enter the direct URL to an audio file. The URL must be publicly accessible.
         </p>
       </div>
       
@@ -269,14 +279,15 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
             </svg>
           </div>
           <div className="ml-3">
-            <h3 className="text-sm font-medium text-gray-200">How to get a shareable link from Google Drive</h3>
+            <h3 className="text-sm font-medium text-gray-200">Supported URL Sources</h3>
             <div className="mt-2 text-sm text-gray-400">
-              <ol className="list-decimal pl-5 space-y-1">
-                <li>Open your file in Google Drive</li>
-                <li>Click on "Share" in the top right</li>
-                <li>Click on "Change to anyone with the link"</li>
-                <li>Click "Copy link" and paste it here</li>
-              </ol>
+              <ul className="list-disc list-inside space-y-1">
+                <li>Direct links to audio files (MP3, WAV, OGG, etc.)</li>
+                <li>Google Drive links (must be publicly accessible)</li>
+                <li>Dropbox shared links</li>
+                <li>Other publicly accessible audio hosting services</li>
+              </ul>
+              <p className="mt-2">For best results, use direct links to audio files.</p>
             </div>
           </div>
         </div>
@@ -300,7 +311,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
           className="w-full py-3 px-5 text-white font-bold rounded-lg transition-all duration-300 
             bg-red-600 hover:bg-red-700 active:scale-98 shadow-lg"
         >
-          Cancel Upload
+          Cancel Transcription
         </button>
       )}
     </div>
