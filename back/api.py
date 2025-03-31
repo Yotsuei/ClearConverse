@@ -577,13 +577,13 @@ class EnhancedAudioProcessor:
                                     confidence=1.0
                                 ))
                         else:
-                    transcription = self.whisper_model.transcribe(
-                        audio_segment.squeeze().cpu().numpy(),
-                        initial_prompt="This is a conversation between two people.",
-                        word_timestamps=True,
-                        condition_on_previous_text=self.config.condition_on_previous_text,
-                        temperature=self.config.temperature
-                    )
+                            transcription = self.whisper_model.transcribe(
+                                audio_segment.squeeze().cpu().numpy(),
+                                initial_prompt="This is a conversation between two people.",
+                                word_timestamps=True,
+                                condition_on_previous_text=self.config.condition_on_previous_text,
+                                temperature=self.config.temperature
+                            )
                     processed_segments.append(AudioSegment(
                         start=seg_start,
                         end=seg_end,
