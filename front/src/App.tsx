@@ -1,7 +1,8 @@
 // App.tsx
 import React, { useState, useRef } from 'react';
 import FileUpload from './components/FileUpload';
-import AudioRecorder from './components/AudioRecorder';
+// import AudioRecorder from './components/AudioRecorder';
+import UrlUpload from './components/UrlUpload';
 import AudioPlayer from './components/AudioPlayer';
 import TranscriptionDisplay from './components/TranscriptionDisplay';
 import MainMenu from './components/MainMenu';
@@ -16,7 +17,7 @@ type AudioSource = {
   url: string | null;
 };
 
-type Module = 'upload' | 'record';
+type Module = 'upload' | 'url';
 
 const App: React.FC = () => {
   const [showMainMenu, setShowMainMenu] = useState<boolean>(true);
@@ -46,28 +47,6 @@ const App: React.FC = () => {
     setAudioSource({ file, url });
   };
 
-  const handleRecordingComplete = (blob: Blob) => {
-    // Get the correct MIME type and extension from the blob
-    let fileExtension = '.webm'; // Default extension
-    
-    // Map MIME types to file extensions
-    if (blob.type.includes('mp4')) {
-      fileExtension = '.mp4';
-    } else if (blob.type.includes('ogg')) {
-      fileExtension = '.ogg';
-    } else if (blob.type.includes('wav')) {
-      fileExtension = '.wav';
-    }
-    
-    console.log(`Recording blob received with type: ${blob.type}, using extension: ${fileExtension}`);
-    
-    // Create file with the correct MIME type - this is critical!
-    const file = new File([blob], `recording${fileExtension}`, { type: blob.type });
-    const url = URL.createObjectURL(blob);
-    
-    setAudioSource({ file, url });
-  };
-
   const resetState = () => {
     // Cancel any ongoing requests first
     cancelTranscription();
@@ -89,8 +68,7 @@ const App: React.FC = () => {
   };
   
   const clearTranscription = () => {
-    // Clear both the transcription result and the audio file
-    setAudioSource({ file: null, url: null });
+    // Only clear the transcription result, keep the audio file
     setTranscript(null);
     setDownloadUrl(null);
     setIsProcessing(false);
@@ -239,7 +217,7 @@ const App: React.FC = () => {
             />
           </div>
 
-          {/* Audio Player - only for upload module */}
+          {/* Audio Player - always show if audio is available */}
           {audioSource.url && (
             <div className="mt-6">
               <AudioPlayer 
@@ -250,22 +228,27 @@ const App: React.FC = () => {
           )}
         </>
       );
-    } else if (activeModule === 'record') {
+    } else if (activeModule === 'url') {
       return (
         <>
           <div className="bg-gray-750 rounded-lg p-6 mb-6 border border-gray-700">
-            <AudioRecorder 
-              onRecordingComplete={handleRecordingComplete} 
-              onTranscribe={audioSource.file ? handleTranscribe : undefined}
+            <UrlUpload 
+              onFileSelected={handleFileSelected}
+              onUploadResponse={handleUploadResponse}
+              setIsUploading={setIsUploading}
+              setUploadProgress={setUploadProgress}
+              setIsProcessing={setIsProcessing}
+              startProcessing={startProcessingSimulation}
+              clearTranscription={clearTranscription}
             />
           </div>
 
-          {/* Audio Player - only shown after recording is completed */}
-          {audioSource.url && !isUploading && !isProcessing && (
+          {/* Audio Player - always show if audio is available */}
+          {audioSource.url && (
             <div className="mt-6">
               <AudioPlayer 
                 audioUrl={audioSource.url} 
-                onTranscribe={handleTranscribe} // Added transcribe button to audio player for recording too
+                onTranscribe={handleTranscribe}
               />
             </div>
           )}
@@ -287,7 +270,7 @@ const App: React.FC = () => {
         <div className="w-full max-w-3xl bg-gray-800 shadow-xl rounded-xl p-8 border border-gray-700">
           <div className="flex justify-between items-center mb-6">
             <h1 className="text-3xl font-extrabold tracking-tight text-gray-100">
-              {activeModule === 'upload' ? 'File Upload Transcription' : 'Audio Recording Transcription'}
+              {activeModule === 'upload' ? 'File Upload Transcription' : 'URL Upload Transcription'}
             </h1>
             <button 
               onClick={goToMainMenu}
@@ -300,7 +283,7 @@ const App: React.FC = () => {
             </button>
           </div>
           
-          {/* Module Content - No more tabs */}
+          {/* Module Content */}
           {renderModuleContent()}
 
           {/* Progress Bars with Cancel Button */}
