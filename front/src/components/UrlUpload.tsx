@@ -1,5 +1,4 @@
-// Updated UrlUpload.tsx with real backend integration
-
+// components/UrlUpload.tsx
 import React, { useState, useEffect } from 'react';
 
 interface UrlUploadProps {
@@ -114,7 +113,8 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
                   throw new Error(result.error);
                 }
                 
-                // Create a dummy file for audio preview (in a real app, you'd fetch the actual audio)
+                // Create a dummy file for audio preview
+                // This is just for UI continuity - the actual audio is processed directly from the URL
                 const dummyAudioBlob = new Blob([], { type: 'audio/mp3' });
                 const audioFile = new File([dummyAudioBlob], 'url_audio.mp3', { type: 'audio/mp3' });
                 
@@ -173,34 +173,43 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
     setIsUploading(true);
     setUploadProgress(0);
     
-    // Create form data with the URL
-    const formData = new FormData();
-    formData.append('url', url);
-
     try {
       // Use XMLHttpRequest for request handling
       const xhr = new XMLHttpRequest();
       setUploadXhr(xhr);
       
+      // Using the dedicated URL transcription endpoint
       xhr.open('POST', 'http://localhost:8000/transcribe-url');
+      xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
       
       xhr.onload = function() {
         if (xhr.status === 200) {
           // Parse response to get task ID
-          const response = JSON.parse(xhr.responseText);
-          if (response.task_id) {
-            setTaskId(response.task_id);
-            startProcessing();
-          } else {
-            throw new Error("Invalid response from server: missing task_id");
+          try {
+            const response = JSON.parse(xhr.responseText);
+            if (response.task_id) {
+              setTaskId(response.task_id);
+              startProcessing();
+            } else {
+              throw new Error("Invalid response from server: missing task_id");
+            }
+          } catch (err) {
+            throw new Error(`Error parsing server response: ${xhr.responseText}`);
           }
         } else {
-          throw new Error(`Server error: ${xhr.status} ${xhr.statusText}`);
+          let errorMsg = "Server error";
+          try {
+            const response = JSON.parse(xhr.responseText);
+            errorMsg = response.detail || `Server error: ${xhr.status}`;
+          } catch (e) {
+            errorMsg = `Server error: ${xhr.status} ${xhr.statusText}`;
+          }
+          throw new Error(errorMsg);
         }
       };
 
       xhr.onerror = function() {
-        throw new Error('Network error occurred');
+        throw new Error('Network error occurred. Please check your connection and try again.');
       };
 
       xhr.onabort = function() {
@@ -209,7 +218,8 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
         setUploadXhr(null);
       };
 
-      xhr.send(formData);
+      // Send the URL as form data
+      xhr.send(`url=${encodeURIComponent(url)}`);
     } catch (error) {
       console.error('URL upload failed:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
@@ -287,7 +297,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
                 <li>Dropbox shared links</li>
                 <li>Other publicly accessible audio hosting services</li>
               </ul>
-              <p className="mt-2">For best results, use direct links to audio files.</p>
+              <p className="mt-2">For best results, use direct links to MP3 or WAV files.</p>
             </div>
           </div>
         </div>
