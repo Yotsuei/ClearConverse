@@ -808,7 +808,7 @@ async def process_url_with_progress(task_id: str, url: str):
         # Update progress - validating URL
         update_progress(task_id, 5, "Validating URL")
         
-        # Validate URL first (assuming this function exists in your backend)
+        # Validate URL first
         validate_url(url)
         
         # Update progress - downloading
@@ -941,49 +941,6 @@ async def download_file_with_progress(url, task_id):
         update_progress(task_id, 100, f"Download failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Server error processing URL: {str(e)}")
 
-async def process_url_with_progress(task_id: str, url: str):
-    """Process audio from URL with progress updates."""
-    temp_file_path = None
-    try:
-        # Update progress - downloading
-        update_progress(task_id, 10, "Downloading file from URL")
-        
-        # Download file from URL
-        temp_file_path = download_file_from_url(url)
-        
-        # Update progress - downloaded
-        update_progress(task_id, 30, "File downloaded, starting transcription")
-        
-        # Set up output directory for this task
-        task_output_dir = os.path.join(OUTPUT_DIR, task_id)
-        os.makedirs(task_output_dir, exist_ok=True)
-        
-        # Process the audio file
-        _, transcript, transcript_path = processor.run(
-            temp_file_path, 
-            output_dir=task_output_dir, 
-            debug_mode=False, 
-            progress_callback=lambda p, m: update_progress(task_id, 30 + int(p * 0.7), m)
-        )
-        
-        # Final update and store result
-        update_progress(task_id, 100, "Transcription complete")
-        result_store[task_id] = {"download_url": f"/download/{task_id}/transcript.txt"}
-        
-    except Exception as e:
-        update_progress(task_id, 100, f"Error: {str(e)}")
-        result_store[task_id] = {"error": str(e)}
-        logging.error(f"Error processing URL {url}: {e}")
-        traceback.print_exc()
-    
-    finally:
-        # Clean up temporary file
-        if temp_file_path and os.path.exists(temp_file_path):
-            try:
-                os.remove(temp_file_path)
-                logging.info(f"Removed temporary file: {temp_file_path}")
-            except Exception as e:
-                logging.error(f"Error removing temporary file {temp_file_path}: {e}")
 @app.post("/transcribe")
 async def transcribe_audio(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
     if not file.filename.endswith((".mp3", ".wav")):
