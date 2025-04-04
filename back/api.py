@@ -157,13 +157,16 @@ class EnhancedAudioProcessor:
 
     def _initialize_models(self):
         logging.info(f"Initializing models on {self.device}...")
-        cache_dir = "models"  
+        cache_dir = "models"
+        # For now, use the base RESepFormer model and cache it as before.
         self.separator = SepformerSeparation.from_hparams(
             source="speechbrain/resepformer-wsj02mix",
             savedir=os.path.join(cache_dir, "resepformer"),
             run_opts={"device": self.device}
         )
-        self.whisper_model = whisper.load_model(self.config.whisper_model_size, download_root=os.path.join(cache_dir, "whisper")).to(self.device)
+        # Load the fine-tuned Whisper model from the local model/ folder.
+        self._load_whisper_model()
+        # Cache diarization and VAD models the same way as the original API.
         self.diarization = Pipeline.from_pretrained(
             "pyannote/speaker-diarization-3.1",
             use_auth_token=self.config.auth_token,
@@ -180,6 +183,29 @@ class EnhancedAudioProcessor:
             use_auth_token=self.config.auth_token,
         ).to(self.device)
         logging.info("Models initialized successfully!")
+
+    def _load_whisper_model(self):
+        logging.info("Loading fine-tuned Whisper model from 'models/whisper' directory...")
+        # Update model_path to point to the new location
+        model_path = Path("models/whisper")
+        try:
+            # Load the base Whisper model first.
+            base_model = whisper.load_model(self.config.whisper_model_size, device="cpu")
+            # Look for fine-tuned weights in the models/whisper directory.
+            if (model_path / "model.pt").exists():
+                checkpoint = torch.load(model_path / "model.pt", map_location="cpu")
+                base_model.load_state_dict(checkpoint, strict=False)
+            elif (model_path / "model.safetensors").exists():
+                from safetensors.torch import load_file
+                state_dict = load_file(model_path / "model.safetensors", device="cpu")
+                base_model.load_state_dict(state_dict, strict=False)
+            else:
+                raise FileNotFoundError("No fine-tuned Whisper model file found in models/whisper directory")
+            self.whisper_model = base_model.to(self.device)
+            logging.info("Fine-tuned Whisper model loaded successfully!")
+        except Exception as e:
+            logging.error(f"Failed to load fine-tuned Whisper model: {e}")
+            raise RuntimeError("Could not load fine-tuned Whisper model")
 
     def load_audio(self, file_path: str) -> Tuple[torch.Tensor, int]:
         logging.info(f"Loading audio from {file_path}")
