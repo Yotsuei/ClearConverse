@@ -36,6 +36,8 @@ import platform
 import subprocess
 from urllib.parse import urlparse
 import validators
+import re
+from fastapi.responses import FileResponse
 
 # =============================================================================
 # Logging setup
@@ -766,14 +768,42 @@ def cleanup_old_tasks():
                 logging.info(f"Cleaning up old task folder: {task_folder}")
                 shutil.rmtree(task_folder)
 
-# Start APScheduler when the app starts
-scheduler = BackgroundScheduler()
-scheduler.add_job(cleanup_old_tasks, 'interval', minutes=10)  # run every 10 minutes
-scheduler.start()
-
 # Make sure to shut down the scheduler when the app exits.
 import atexit
 atexit.register(lambda: scheduler.shutdown())
+
+def convert_google_drive_url(drive_url: str) -> str:
+    """
+    Convert a Google Drive sharing URL into a direct download URL.
+    Supports URLs in formats like:
+      - https://drive.google.com/file/d/FILE_ID/view
+      - https://drive.google.com/open?id=FILE_ID
+    Returns an empty string if conversion fails.
+    """
+    # Pattern for /file/d/FILE_ID/view
+    file_match = re.search(r'/file/d/([^/]+)', drive_url)
+    if file_match:
+        file_id = file_match.group(1)
+        return f"https://drive.google.com/uc?export=download&id={file_id}"
+    
+    # Pattern for open?id=FILE_ID
+    open_match = re.search(r'[?&]id=([^&]+)', drive_url)
+    if open_match:
+        file_id = open_match.group(1)
+        return f"https://drive.google.com/uc?export=download&id={file_id}"
+    
+    # Conversion failed
+    return ""
+
+@app.get("/preview/{filename}")
+async def preview_audio(filename: str):
+    file_path = Path("temp_uploads") / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    # You might want to determine the correct media_type based on the extension.
+    return FileResponse(str(file_path), media_type="audio/mpeg", filename=filename)
+
+
 
 def update_progress(task_id: str, percent: int, message: str):
     progress_store[task_id] = {"progress": percent, "message": message}
@@ -805,13 +835,7 @@ async def process_audio_with_progress(task_id: str, file_path: str):
         traceback.print_exc()
     
     finally:
-        # Always clean up the temporary file
-        if os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-                logging.info(f"Removed temporary file: {file_path}")
-            except Exception as e:
-                logging.error(f"Failed to remove temporary file {file_path}: {e}")
+        pass
 
 async def download_file_with_progress(url, task_id):
     """
@@ -924,66 +948,58 @@ async def transcribe_audio(file: UploadFile = File(...), background_tasks: Backg
 
 @app.post("/transcribe-url")
 async def transcribe_from_url(url: str = Form(...), background_tasks: BackgroundTasks = None):
-    """Endpoint to transcribe audio from a URL by first downloading to a temporary file"""
-    # First validate the URL
+    # First validate the URL and convert Google Drive URLs if applicable
     validate_url(url)
-    
+    if 'drive.google.com' in url:
+        converted_url = convert_google_drive_url(url)
+        if converted_url:
+            url = converted_url
+        else:
+            raise HTTPException(status_code=400, detail="Invalid Google Drive URL format.")
+
     try:
-        # Create a unique task ID
         task_id = str(uuid.uuid4())
         update_progress(task_id, 0, "Task queued - Downloading audio from URL")
         
-        # Create temp directory if it doesn't exist
         temp_dir = Path("temp_uploads")
         temp_dir.mkdir(exist_ok=True)
         
-        # Determine file extension from URL or use a default
+        # Determine file extension based on URL or headers logic (if needed)
         parsed_url = urlparse(url)
         path = parsed_url.path.lower()
-        file_extension = '.mp3'  # Default extension
-        
-        # Try to extract extension from URL
+        file_extension = '.mp3'  # default
         if '.' in path:
             ext = path.split('.')[-1].lower()
             if ext in ['mp3', 'wav', 'ogg', 'mp4', 'flac', 'm4a']:
                 file_extension = f'.{ext}'
         
-        # Create a filename with timestamp to avoid collisions
+        # Create a filename using timestamp and task_id to avoid collisions
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"url_audio_{timestamp}_{task_id[:8]}{file_extension}"
         temp_file_path = temp_dir / filename
-        
-        # Download the file with progress tracking
+
+        # Use the shared download function (if appropriate)
+        # If download_file_with_progress is asynchronous, you can await it; otherwise,
+        # you can inline similar logic here.
         update_progress(task_id, 5, "Starting file download")
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        
-        # Stream the download with progress updates
-        with requests.get(url, headers=headers, stream=True, timeout=30) as r:
+        with requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, stream=True, timeout=30) as r:
             r.raise_for_status()
             total_size = int(r.headers.get('content-length', 0))
             downloaded = 0
-            
             with open(temp_file_path, 'wb') as f:
                 for chunk in r.iter_content(chunk_size=8192):
                     if chunk:
                         f.write(chunk)
                         downloaded += len(chunk)
-                        
-                        # Update progress periodically
                         if total_size:
                             progress_percent = int(min(20, (downloaded / total_size) * 20))
-                            update_progress(task_id, 5 + progress_percent, f"Downloading file: {int(downloaded / total_size * 100)}% complete")
-        
+                            update_progress(task_id, 5 + progress_percent, f"Downloading file: {int((downloaded / total_size) * 100)}% complete")
         update_progress(task_id, 25, "Download complete, preparing for processing")
-        
-        # Now process the downloaded file just like a regular uploaded file
-        # This ensures we use the same pipeline for both file upload and URL processing
+
+        # Build preview URL from the saved file in temp_uploads folder
+        preview_url = f"http://localhost:8000/preview/{filename}"
         background_tasks.add_task(process_audio_with_progress, task_id, str(temp_file_path))
-        
-        return JSONResponse(content={"task_id": task_id})
-        
+        return JSONResponse(content={"task_id": task_id, "preview_url": preview_url})
     except Exception as e:
         logging.error(f"Error in /transcribe-url endpoint: {e}")
         traceback.print_exc()
@@ -1019,15 +1035,32 @@ async def download_transcript(file_path: str):
         raise HTTPException(status_code=404, detail="Transcript file not found.")
     return FileResponse(path=str(transcript_path), media_type="text/plain", filename=transcript_path.name)
 
-# New cleanup endpoint to remove the temporary processed_audio folder for a given task.
 @app.delete("/cleanup/{task_id}")
 async def cleanup(task_id: str):
-    task_folder = Path(OUTPUT_DIR) / task_id
-    if task_folder.exists() and task_folder.is_dir():
-        shutil.rmtree(task_folder)
-        return JSONResponse(content={"status": f"Cleaned up files for task {task_id}"})
+    # Remove processed_audio folder for this task
+    task_processed_folder = Path(OUTPUT_DIR) / task_id
+    if task_processed_folder.exists() and task_processed_folder.is_dir():
+        shutil.rmtree(task_processed_folder)
+        logging.info(f"Cleared processed audio folder for task {task_id}")
     else:
-        raise HTTPException(status_code=404, detail="Task folder not found.")
+        logging.info(f"No processed audio folder found for task {task_id}")
+    
+    # Remove any temp_upload file that includes a substring of the task id
+    temp_dir = Path("temp_uploads")
+    files_removed = 0
+    for temp_file in temp_dir.iterdir():
+        # Assuming the filename contains the first 8 characters of the task id
+        if task_id[:8] in temp_file.name:
+            try:
+                temp_file.unlink()
+                files_removed += 1
+                logging.info(f"Removed temp file: {temp_file}")
+            except Exception as e:
+                logging.error(f"Failed to remove temp file {temp_file}: {e}")
+    if files_removed == 0:
+        logging.info(f"No temp files found for task {task_id}")
+    
+    return JSONResponse(content={"status": f"Cleaned up files for task {task_id}"})
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

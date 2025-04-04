@@ -183,42 +183,6 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
     }
   }, [taskId]);
 
-  // Convert Google Drive link to direct download link
-  const convertGoogleDriveLink = (driveUrl: string): string => {
-    // Extract file ID from Google Drive sharing URLs
-    let fileId = '';
-    
-    // Pattern for "drive.google.com/file/d/FILE_ID/view" format
-    const filePattern = /\/file\/d\/([^\/]+)/;
-    const fileMatch = driveUrl.match(filePattern);
-    
-    // Pattern for "drive.google.com/open?id=FILE_ID" format
-    const openPattern = /[?&]id=([^&]+)/;
-    const openMatch = driveUrl.match(openPattern);
-    
-    // Pattern for "drive.google.com/drive/folders/FILE_ID" format
-    const folderPattern = /\/folders\/([^\/\?]+)/;
-    const folderMatch = driveUrl.match(folderPattern);
-    
-    if (fileMatch && fileMatch[1]) {
-      fileId = fileMatch[1];
-    } else if (openMatch && openMatch[1]) {
-      fileId = openMatch[1];
-    } else if (folderMatch && folderMatch[1]) {
-      return ''; // Cannot directly download a folder
-    } else {
-      return ''; // Unknown format
-    }
-    
-    if (fileId) {
-      // Return direct download link format
-      return `https://drive.google.com/uc?export=download&id=${fileId}`;
-    }
-    
-    return driveUrl; // Return original if couldn't convert
-  };
-
-  // Load the audio for preview before transcribing
   const handleLoadAudio = async () => {
     if (!url || !isValidUrl) {
       setUrlError('Please enter a valid URL');
@@ -231,112 +195,48 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
     setUrlError(null);
     
     try {
-      let processedUrl = url;
-      
-      // Check if it's a Google Drive link and convert if needed
-      if (url.includes('drive.google.com')) {
-        const convertedUrl = convertGoogleDriveLink(url);
-        if (!convertedUrl) {
-          throw new Error('Could not convert Google Drive link. Make sure it\'s a file, not a folder.');
-        }
-        processedUrl = convertedUrl;
-        console.log("Converted URL:", processedUrl);
-      }
-      
-      // Create a proxy URL if needed (for CORS issues)
-      // Note: In a production environment, you would handle this server-side
-      // This is just for demonstration purposes
-      const proxyUrl = `http://localhost:8000/proxy?url=${encodeURIComponent(processedUrl)}`;
-      
-      // Test audio loading with a temporary audio element
+      // Directly use the URL without conversion since the API handles it
+      // Optionally, you could directly set a temporary preview URL if available
+      // Here we assume the preview will be available after transcription.
       const audio = new Audio();
-      
       audio.onloadeddata = () => {
-        // Create a blob URL from the audio for preview
-        setAudioUrl(processedUrl); // Use original URL or processed URL
-        
-        // Create a temporary file object for the parent component
-        const fileName = processedUrl.split('/').pop() || 'audio_from_url.mp3';
-        const mimeType = fileName.endsWith('.mp3') ? 'audio/mpeg' : 
-                        fileName.endsWith('.wav') ? 'audio/wav' : 'audio/mpeg';
-        
-        // Create a minimal blob to represent the remote file
-        const placeholderBlob = new Blob(['audio placeholder'], { type: mimeType });
-        const file = new File([placeholderBlob], fileName, { 
-          type: mimeType,
-          lastModified: new Date().getTime()
-        });
-        
-        // Pass file to parent component
-        onFileSelected(file);
-        
+        // Set a temporary state or simply mark as loaded.
         setAudioLoaded(true);
         setIsLoading(false);
       };
-      
       audio.onerror = (e) => {
         console.error("Audio loading error:", e);
-        setUrlError('Error loading audio from URL. Make sure it\'s a direct link to an audio file that\'s publicly accessible.');
+        setUrlError('Error loading audio from URL. Ensure the URL points directly to an accessible audio file.');
         setIsLoading(false);
       };
-      
-      // Set a timeout in case the audio loading hangs
-      const timeoutId = setTimeout(() => {
-        if (!audioLoaded) {
-          audio.src = '';
-          setUrlError('Timeout while loading audio. The URL might be inaccessible or not a direct audio file link.');
-          setIsLoading(false);
-        }
-      }, 15000); // 15 second timeout
-      
-      // Try to load the audio
       audio.crossOrigin = "anonymous";
-      audio.src = processedUrl; // Try direct URL first
+      audio.src = url;
       audio.load();
-      
-      // Clean up timeout
-      return () => clearTimeout(timeoutId);
-      
     } catch (error) {
       console.error('URL loading failed:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      setUrlError(`Error: ${errorMessage}`);
+      setUrlError(`Error: ${error instanceof Error ? error.message : 'Unknown error occurred'}`);
       setIsLoading(false);
     }
   };
 
   // Second step: Transcribe the audio
   const handleTranscribe = async () => {
-    // Clear any previous transcription
     clearTranscription();
-    
     if (!url || !isValidUrl) {
       setUrlError('Please enter a valid audio URL');
       return;
     }
     
     setIsUploading(true);
-    setUploadProgress(5); // Start with a small initial progress
+    setUploadProgress(5);
     setUrlError(null);
     
-    let processedUrl = url;
-    
-    // Check if it's a Google Drive link and convert if needed
-    if (url.includes('drive.google.com')) {
-      const convertedUrl = convertGoogleDriveLink(url);
-      if (convertedUrl) {
-        processedUrl = convertedUrl;
-      }
-    }
-    
     try {
-      // Using the dedicated URL transcription endpoint
+      // Directly use the provided URL; no need to convert it here.
       const response = await fetch('http://localhost:8000/transcribe-url', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: `url=${encodeURIComponent(processedUrl)}`
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `url=${encodeURIComponent(url)}`
       });
       
       if (!response.ok) {
@@ -344,24 +244,21 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
         try {
           const errorJson = JSON.parse(errorMessage);
           errorMessage = errorJson.detail || `Error ${response.status}: ${response.statusText}`;
-        } catch (e) {
-          // If not JSON, use the text directly
-        }
+        } catch (e) {}
         throw new Error(errorMessage);
       }
       
       const result = await response.json();
-      
-      if (result.task_id) {
+      if (result.task_id && result.preview_url) {
         setTaskId(result.task_id);
-        // WebSocket will now track progress
+        // Use the preview URL returned by the API to show the audio preview.
+        setAudioUrl(result.preview_url);
       } else {
-        throw new Error("Invalid response from server: missing task_id");
+        throw new Error("Invalid response from server: missing task_id or preview_url");
       }
     } catch (error) {
       console.error('URL transcription failed:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      setUrlError(`Error: ${errorMessage}`);
+      setUrlError(`Error: ${error instanceof Error ? error.message : 'Unknown error occurred'}`);
       setIsUploading(false);
       setUploadProgress(0);
       setTaskId(null);
@@ -469,6 +366,12 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
       )}
       
       {/* Step 2 - Transcribe Button (after audio is loaded) */}
+      {audioLoaded && audioUrl && (
+        <audio controls src={audioUrl} crossOrigin="anonymous">
+          Your browser does not support the audio element.
+        </audio>
+      )}
+
       {audioLoaded && !uploadXhr && !taskId && (
         <button
           onClick={handleTranscribe}
