@@ -26,14 +26,19 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
   const [uploadXhr, setUploadXhr] = useState<XMLHttpRequest | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [wsConnection, setWsConnection] = useState<WebSocket | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [audioLoaded, setAudioLoaded] = useState<boolean>(false);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
 
   // Basic URL validation
   const handleUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const inputUrl = e.target.value;
     setUrl(inputUrl);
     
-    // Clear previous errors
+    // Clear previous errors and states
     setUrlError(null);
+    setAudioLoaded(false);
+    setAudioUrl(null);
     
     // Validate the URL (basic validation)
     if (inputUrl.trim() !== '') {
@@ -99,11 +104,30 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
           console.log("Progress update:", data);
           
           // Update progress based on the server message
-          setUploadProgress(data.progress);
+          if (data.progress <= 30) {
+            // First 30% is considered upload
+            setIsUploading(true);
+            setUploadProgress(data.progress * (100/30)); // Scale to 0-100%
+          } else {
+            // After 30%, switch to processing mode
+            setIsUploading(false);
+            setIsProcessing(true);
+            // Scale from 30-100 to 0-100
+            const scaledProgress = ((data.progress - 30) / (100 - 30)) * 100;
+            startProcessing(); // Ensure processing mode is active
+            setUploadProgress(100); // Upload is complete
+          }
+          
+          // Add message display if you want to show server messages
+          if (data.message) {
+            console.log("Server message:", data.message);
+            // Could display this message in the UI
+          }
           
           // If processing is complete
           if (data.progress >= 100) {
             setIsUploading(false);
+            setIsProcessing(false);
             
             // Fetch the result
             fetch(`http://localhost:8000/task/${taskId}/result`)
@@ -112,14 +136,6 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
                 if (result.error) {
                   throw new Error(result.error);
                 }
-                
-                // Create a dummy file for audio preview
-                // This is just for UI continuity - the actual audio is processed directly from the URL
-                const dummyAudioBlob = new Blob([], { type: 'audio/mp3' });
-                const audioFile = new File([dummyAudioBlob], 'url_audio.mp3', { type: 'audio/mp3' });
-                
-                // Pass results to parent components
-                onFileSelected(audioFile);
                 
                 // Fetch transcript content
                 fetch(`http://localhost:8000${result.download_url}`)
@@ -161,71 +177,118 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
     }
   }, [taskId]);
 
-  const handleUpload = async () => {
-    // Clear any previous transcription when uploading
-    clearTranscription();
-    
+  // First step: Load the audio without transcribing
+  const handleLoadAudio = async () => {
     if (!url || !isValidUrl) {
       setUrlError('Please enter a valid URL');
       return;
     }
     
-    setIsUploading(true);
-    setUploadProgress(0);
+    setIsLoading(true);
+    setAudioLoaded(false);
+    setAudioUrl(null);
+    setUrlError(null);
     
     try {
-      // Use XMLHttpRequest for request handling
-      const xhr = new XMLHttpRequest();
-      setUploadXhr(xhr);
+      // Create a URL object to validate
+      new URL(url);
       
-      // Using the dedicated URL transcription endpoint
-      xhr.open('POST', 'http://localhost:8000/transcribe-url');
-      xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+      // Use a proxy/cors approach or direct if allowed
+      // For this example, we'll create a blob URL for the audio
+      // In a real implementation, you might need to download via backend
       
-      xhr.onload = function() {
-        if (xhr.status === 200) {
-          // Parse response to get task ID
-          try {
-            const response = JSON.parse(xhr.responseText);
-            if (response.task_id) {
-              setTaskId(response.task_id);
-              startProcessing();
-            } else {
-              throw new Error("Invalid response from server: missing task_id");
-            }
-          } catch (err) {
-            throw new Error(`Error parsing server response: ${xhr.responseText}`);
-          }
-        } else {
-          let errorMsg = "Server error";
-          try {
-            const response = JSON.parse(xhr.responseText);
-            errorMsg = response.detail || `Server error: ${xhr.status}`;
-          } catch (e) {
-            errorMsg = `Server error: ${xhr.status} ${xhr.statusText}`;
-          }
-          throw new Error(errorMsg);
-        }
+      // Create a temporary audio element to test loading
+      const audio = new Audio();
+      
+      // Set up event listeners
+      audio.onloadeddata = () => {
+        // Create a blob URL from the audio 
+        // (In a real implementation, you should download the file)
+        
+        // Here we'll "fake" the audio loading by just passing the URL directly
+        // which works for many direct audio URLs but not for services that require authentication
+        
+        // Create a blob with metadata for the file props
+        const temporaryBlob = new Blob(['audio content'], { type: 'audio/mpeg' });
+        const fileName = url.split('/').pop() || 'audio_from_url.mp3';
+        const file = new File([temporaryBlob], fileName, { type: 'audio/mpeg' });
+        
+        // Pass file to parent component
+        onFileSelected(file);
+        
+        // Set the audio URL for direct playing
+        setAudioUrl(url);
+        setAudioLoaded(true);
+        setIsLoading(false);
       };
-
-      xhr.onerror = function() {
-        throw new Error('Network error occurred. Please check your connection and try again.');
+      
+      audio.onerror = () => {
+        setUrlError('Error loading audio from URL. Make sure it\'s a direct link to an audio file.');
+        setIsLoading(false);
       };
-
-      xhr.onabort = function() {
-        console.log('URL upload aborted');
-        setIsUploading(false);
-        setUploadXhr(null);
-      };
-
-      // Send the URL as form data
-      xhr.send(`url=${encodeURIComponent(url)}`);
+      
+      // Start loading the audio
+      audio.src = url;
+      audio.load();
+      
     } catch (error) {
-      console.error('URL upload failed:', error);
+      console.error('URL loading failed:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      setUrlError(`Error: ${errorMessage}`);
+      setIsLoading(false);
+    }
+  };
+
+  // Second step: Transcribe the audio (called after preview)
+  const handleTranscribe = async () => {
+    // Clear any previous transcription when uploading
+    clearTranscription();
+    
+    if (!url || !isValidUrl || !audioLoaded) {
+      setUrlError('Please load the audio first');
+      return;
+    }
+    
+    setIsUploading(true);
+    setUploadProgress(5); // Start with a small initial progress
+    setUrlError(null);
+    
+    try {
+      // Using the dedicated URL transcription endpoint
+      const response = await fetch('http://localhost:8000/transcribe-url', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: `url=${encodeURIComponent(url)}`
+      });
+      
+      if (!response.ok) {
+        let errorMessage = await response.text();
+        try {
+          const errorJson = JSON.parse(errorMessage);
+          errorMessage = errorJson.detail || `Error ${response.status}: ${response.statusText}`;
+        } catch (e) {
+          // If not JSON, use the text directly
+        }
+        throw new Error(errorMessage);
+      }
+      
+      const result = await response.json();
+      
+      if (result.task_id) {
+        setTaskId(result.task_id);
+        // WebSocket will now track progress
+      } else {
+        throw new Error("Invalid response from server: missing task_id");
+      }
+    } catch (error) {
+      console.error('URL transcription failed:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       setUrlError(`Error: ${errorMessage}`);
       setIsUploading(false);
-      setUploadXhr(null);
+      setUploadProgress(0);
+      setTaskId(null);
     }
   };
 
@@ -233,6 +296,13 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
     setUrl('');
     setIsValidUrl(false);
     setUrlError(null);
+    setAudioLoaded(false);
+    setAudioUrl(null);
+    // Also notify parent component to clear audio preview
+    const emptyBlob = new Blob([], { type: 'audio/mp3' });
+    const emptyFile = new File([emptyBlob], 'empty.mp3', { type: 'audio/mp3' });
+    onFileSelected(emptyFile);
+    clearTranscription();
   };
 
   return (
@@ -281,31 +351,10 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
         </p>
       </div>
       
-      <div className="bg-gray-700 border border-gray-600 rounded-lg p-4 mb-4">
-        <div className="flex items-start">
-          <div className="flex-shrink-0">
-            <svg className="h-5 w-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-            </svg>
-          </div>
-          <div className="ml-3">
-            <h3 className="text-sm font-medium text-gray-200">Supported URL Sources</h3>
-            <div className="mt-2 text-sm text-gray-400">
-              <ul className="list-disc list-inside space-y-1">
-                <li>Direct links to audio files (MP3, WAV, OGG, etc.)</li>
-                <li>Google Drive links (must be publicly accessible)</li>
-                <li>Dropbox shared links</li>
-                <li>Other publicly accessible audio hosting services</li>
-              </ul>
-              <p className="mt-2">For best results, use direct links to MP3 or WAV files.</p>
-            </div>
-          </div>
-        </div>
-      </div>
-      
-      {!uploadXhr ? (
+      {/* Step 1 - Load Audio Button (when not yet loaded) */}
+      {!audioLoaded && !isLoading && !uploadXhr && (
         <button
-          onClick={handleUpload}
+          onClick={handleLoadAudio}
           disabled={!url || !isValidUrl}
           className={`w-full py-3 px-5 text-white font-bold rounded-lg transition-all duration-300 
             ${!url || !isValidUrl
@@ -313,9 +362,37 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
               : 'bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg'}`
           }
         >
-          Transcribe from URL
+          Load Audio from URL
         </button>
-      ) : (
+      )}
+      
+      {/* Loading indicator */}
+      {isLoading && (
+        <button
+          disabled
+          className="w-full py-3 px-5 text-white font-bold rounded-lg bg-blue-600 flex items-center justify-center"
+        >
+          <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          Loading Audio...
+        </button>
+      )}
+      
+      {/* Step 2 - Transcribe Button (after audio is loaded) */}
+      {audioLoaded && !uploadXhr && (
+        <button
+          onClick={handleTranscribe}
+          className="w-full py-3 px-5 text-white font-bold rounded-lg transition-all duration-300 
+            bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg"
+        >
+          Transcribe Audio
+        </button>
+      )}
+      
+      {/* Cancel button (during transcription) */}
+      {uploadXhr && (
         <button
           onClick={handleCancelUpload}
           className="w-full py-3 px-5 text-white font-bold rounded-lg transition-all duration-300 

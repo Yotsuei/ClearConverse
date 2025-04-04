@@ -8,7 +8,6 @@ import MainMenu from './components/MainMenu';
 import ProgressBar from './components/ProgressBar';
 import ResetButton from './components/ResetButton';
 import ClearButton from './components/ClearButton';
-import FloatingActionButton from './components/FloatingActionButton';
 import './index.css';
 
 type AudioSource = {
@@ -40,6 +39,12 @@ const App: React.FC = () => {
 
   // Handle file selection
   const handleFileSelected = (file: File) => {
+    // If it's an empty file (used for clearing), don't create Object URL
+    if (file.size === 0) {
+      setAudioSource({ file: null, url: null });
+      return;
+    }
+    
     const url = URL.createObjectURL(file);
     setAudioSource({ file, url });
   };
@@ -296,11 +301,13 @@ const App: React.FC = () => {
               clearTranscription={clearTranscription}
             />
           </div>
+
+          {/* Audio Player - always show if audio is available and when the actual URL is available for URL uploads */}
           {audioSource.url && (
             <div className="mt-6">
               <AudioPlayer 
                 audioUrl={audioSource.url} 
-                onTranscribe={handleTranscribe}
+                onTranscribe={transcript ? undefined : handleTranscribe} // Only show transcribe button if no transcript yet
               />
             </div>
           )}

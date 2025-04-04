@@ -799,67 +799,32 @@ async def process_audio_with_progress(task_id: str, file_path: str):
             logging.info(f"Removed temporary file: {file_path}")
 
 async def process_url_with_progress(task_id: str, url: str):
-    """Process audio from URL with progress updates."""
+    """Process audio from URL with detailed progress updates."""
     temp_file_path = None
     try:
+        # Initial progress update - starting
+        update_progress(task_id, 0, "Initializing task")
+        
+        # Update progress - validating URL
+        update_progress(task_id, 5, "Validating URL")
+        
+        # Validate URL first
+        validate_url(url)
+        
         # Update progress - downloading
-        update_progress(task_id, 10, "Downloading file from URL")
+        update_progress(task_id, 10, "Starting file download")
         
-        # Download file from URL
-        temp_file_path = download_file_from_url(url)
+        # Download file from URL with progress updates
+        temp_file_path = await download_file_with_progress(url, task_id)
         
-        # Update progress - downloaded
-        update_progress(task_id, 30, "File downloaded, starting transcription")
-        
-        # Set up output directory for this task
-        task_output_dir = os.path.join(OUTPUT_DIR, task_id)
-        
-        # Process the audio file
-        processor.run(
-            temp_file_path, 
-            output_dir=task_output_dir, 
-            debug_mode=False, 
-            progress_callback=lambda p, m: update_progress(task_id, 30 + int(p * 0.7), m)
-        )
-        
-        # Final update and store result
-        update_progress(task_id, 100, "Transcription complete")
-        result_store[task_id] = {"download_url": f"/download/{task_id}/transcript.txt"}
-    
-    except Exception as e:
-        update_progress(task_id, 100, f"Error: {str(e)}")
-        result_store[task_id] = {"error": str(e)}
-        logging.error(f"Error processing URL {url}: {e}")
-        traceback.print_exc()
-    
-    finally:
-        # Clean up temporary file
-        if temp_file_path and os.path.exists(temp_file_path):
-            try:
-                os.remove(temp_file_path)
-                logging.info(f"Removed temporary file: {temp_file_path}")
-            except Exception as e:
-                logging.error(f"Error in url processing : {e}")
-                raise HTTPException(status_code=500, detail=str(e))
-
-async def process_url_with_progress(task_id: str, url: str):
-    """Process audio from URL with progress updates."""
-    temp_file_path = None
-    try:
-        # Update progress - downloading
-        update_progress(task_id, 10, "Downloading file from URL")
-        
-        # Download file from URL
-        temp_file_path = download_file_from_url(url)
-        
-        # Update progress - downloaded
-        update_progress(task_id, 30, "File downloaded, starting transcription")
+        # Update progress - download complete
+        update_progress(task_id, 30, "Download complete, preparing for transcription")
         
         # Set up output directory for this task
         task_output_dir = os.path.join(OUTPUT_DIR, task_id)
         os.makedirs(task_output_dir, exist_ok=True)
         
-        # Process the audio file
+        # Process the audio file with progress callbacks
         _, transcript, transcript_path = processor.run(
             temp_file_path, 
             output_dir=task_output_dir, 
@@ -884,7 +849,99 @@ async def process_url_with_progress(task_id: str, url: str):
                 os.remove(temp_file_path)
                 logging.info(f"Removed temporary file: {temp_file_path}")
             except Exception as e:
-                logging.error(f"Error removing temporary file {temp_file_path}: {e}")
+                logging.error(f"Error in url processing : {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+
+async def download_file_with_progress(url, task_id):
+    """
+    Download a file from a URL with progress updates and save it to a temporary file.
+    Returns the path to the downloaded file.
+    """
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        # First, make a HEAD request to get the content length
+        head_response = requests.head(url, headers=headers, timeout=10)
+        head_response.raise_for_status()
+        
+        # Get content length if available
+        content_length = int(head_response.headers.get('Content-Length', 0))
+        
+        # Determine file extension from content type or URL
+        content_type = head_response.headers.get('Content-Type', '')
+        file_ext = '.mp3'  # Default extension
+        
+        if 'audio/wav' in content_type:
+            file_ext = '.wav'
+        elif 'audio/mpeg' in content_type or 'audio/mp3' in content_type:
+            file_ext = '.mp3'
+        elif 'audio/ogg' in content_type:
+            file_ext = '.ogg'
+        elif 'video/mp4' in content_type:
+            file_ext = '.mp4'
+        else:
+            # Try to get extension from URL
+            parsed_url = urlparse(url)
+            path = parsed_url.path
+            if '.' in path:
+                url_ext = path.split('.')[-1].lower()
+                if url_ext in ['mp3', 'wav', 'ogg', 'mp4']:
+                    file_ext = f'.{url_ext}'
+        
+        # Create a temporary file with the determined extension
+        temp_file = tempfile.NamedTemporaryFile(suffix=file_ext, delete=False)
+        temp_file_path = temp_file.name
+        temp_file.close()
+        
+        # Now make the actual request to download the file
+        update_progress(task_id, 12, "Starting file download")
+        
+        response = requests.get(url, headers=headers, stream=True, timeout=30)
+        response.raise_for_status()
+        
+        # Get actual content length from streaming response if available
+        content_length = int(response.headers.get('Content-Length', 0)) or content_length
+        
+        # Download the file with progress updates
+        downloaded = 0
+        last_progress_update = 0
+        
+        with open(temp_file_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    
+                    # Calculate progress percentage for download phase (10-30%)
+                    if content_length:
+                        download_percentage = (downloaded / content_length) * 100
+                        # Scale to 10-30% range of overall progress
+                        overall_progress = 10 + (download_percentage * 0.2)  # 20% of progress is for download
+                        
+                        # Only update every 2% to avoid too many updates
+                        current_progress = int(overall_progress)
+                        if current_progress >= last_progress_update + 2:
+                            update_progress(task_id, current_progress, f"Downloading file: {current_progress-10}% complete")
+                            last_progress_update = current_progress
+        
+        # Ensure we mark download as complete
+        update_progress(task_id, 30, "Download complete, preparing for processing")
+        
+        logging.info(f"Downloaded file from {url} to {temp_file_path}")
+        return temp_file_path
+    
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error downloading file from URL {url}: {str(e)}")
+        update_progress(task_id, 100, f"Download failed: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Failed to download file from URL: {str(e)}")
+    
+    except Exception as e:
+        logging.error(f"Unexpected error downloading file from URL {url}: {str(e)}")
+        update_progress(task_id, 100, f"Download failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Server error processing URL: {str(e)}")
+
 @app.post("/transcribe")
 async def transcribe_audio(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
     if not file.filename.endswith((".mp3", ".wav")):
@@ -987,3 +1044,4 @@ if __name__ == "__main__":
             metadata={'overlap_speakers': involved_speakers}
         ))
         meta_counts[final_label] = meta_counts.get(final_label, 0) + 1
+
