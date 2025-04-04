@@ -631,7 +631,7 @@ class EnhancedAudioProcessor:
 # =============================================================================
 
 app = FastAPI(
-    title="Enhanced Audio Transcription API",
+    title="ClearConnverse API",
     description="API to process audio files (MP3/WAV) and return a formatted transcript. The transcript can also be downloaded as a TXT file."
 )
 
