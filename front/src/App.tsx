@@ -1,4 +1,3 @@
-// App.tsx - Updated with main menu and separate navigation
 import React, { useState, useEffect } from 'react';
 import FileUpload from './components/FileUpload';
 import UrlUpload from './components/UrlUpload';
@@ -195,14 +194,16 @@ const App: React.FC = () => {
           )}
         </div>
         
-        {/* Transcription display */}
+        {/* Transcription display - outside the main content box */}
         {transcript && (
-          <TranscriptionDisplay 
-            transcript={transcript} 
-            downloadUrl={downloadUrl}
-            onClear={clearTranscription}
-            onReset={handleReset}
-          />
+          <div className="mt-6 bg-gray-800 rounded-lg shadow-lg border border-gray-700">
+            <TranscriptionDisplay 
+              transcript={transcript} 
+              downloadUrl={downloadUrl}
+              onClear={clearTranscription}
+              onReset={handleReset}
+            />
+          </div>
         )}
         
         {/* Reset button only shown when not on main menu */}

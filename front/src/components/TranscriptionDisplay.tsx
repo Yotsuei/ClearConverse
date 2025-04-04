@@ -1,4 +1,3 @@
-// components/TranscriptionDisplay.tsx
 import React, { useState } from 'react';
 
 interface TranscriptionDisplayProps {
@@ -95,7 +94,7 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
   const duration = durationMatch ? parseFloat(durationMatch[1]).toFixed(1) : "N/A";
 
   return (
-    <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 mt-6 shadow-sm">
+    <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 shadow-sm">
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-2xl font-bold text-gray-200">Transcription Result</h2>
         
