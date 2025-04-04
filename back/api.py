@@ -1064,26 +1064,4 @@ async def cleanup(task_id: str):
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
-    if is_overlap:
-        mapped_profiles = {speaker_mapping.get(k, k): v for k, v in speaker_embeddings.items()}
-        refined_results = self._process_overlap_segment(
-        audio_segment,
-        speaker_embeddings=mapped_profiles,
-        involved_speakers=[speaker_mapping.get(s, s) for s in involved_speakers],
-        seg_start=seg_start,
-        seg_end=seg_end
-        )
-    for result in refined_results:
-        final_label = result['speaker_id']
-        processed_segments.append(AudioSegment(
-            start=seg_start,
-            end=seg_end,
-            speaker_id=final_label,
-            audio_tensor=result['audio'],
-            is_overlap=True,
-            transcription=result['transcription'],
-            confidence=result.get('confidence', 0.5),
-            metadata={'overlap_speakers': involved_speakers}
-        ))
-        meta_counts[final_label] = meta_counts.get(final_label, 0) + 1
 
