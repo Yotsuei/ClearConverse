@@ -19,20 +19,24 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
 
   // Parse the transcript to highlight speaker segments
   const formatTranscript = (text: string) => {
+    if (!text) return <p>No transcription available.</p>;
+    
     // Check if the transcript includes speaker tags like [SPEAKER_X]
-    const hasSpeakerTags = /\[SPEAKER_[A-Z]\]/g.test(text);
+    const hasSpeakerTags = /\[(SPEAKER_[A-Z]|[A-Z]+)\]/g.test(text);
     
     if (hasSpeakerTags) {
-      // Split by speaker tags [SPEAKER_X]
-      const parts = text.split(/(\[SPEAKER_[A-Z]\])/g);
+      // Split by speaker tags [SPEAKER_X] or other bracketed tags
+      const parts = text.split(/(\[[A-Z_]+\])/g);
       
       return parts.map((part, index) => {
-        if (part.match(/\[SPEAKER_[A-Z]\]/)) {
+        if (part.match(/\[[A-Z_]+\]/)) {
           const speaker = part.replace(/[\[\]]/g, '');
           // Assign different colors based on speaker
-          const color = speaker === 'SPEAKER_A' ? 'text-blue-400' : 
-                       speaker === 'SPEAKER_B' ? 'text-gray-300' : 
-                       speaker === 'SPEAKER_C' ? 'text-gray-400' : 'text-gray-500';
+          const color = speaker.includes('SPEAKER_A') ? 'text-blue-400' : 
+                       speaker.includes('SPEAKER_B') ? 'text-green-300' : 
+                       speaker.includes('SPEAKER_C') ? 'text-yellow-300' : 
+                       speaker.includes('SPEAKER_D') ? 'text-purple-300' : 'text-gray-400';
+          
           return (
             <span key={index} className={`font-semibold ${color}`}>
               {part.replace('SPEAKER_A', 'Speaker A')
@@ -42,12 +46,16 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
             </span>
           );
         }
+        // Add line breaks for timestamps
+        if (part.includes('s - ')) {
+          return <span key={index}>{part}<br /></span>;
+        }
         return <span key={index}>{part}</span>;
       });
     } else {
       // If no speaker tags, add paragraph breaks for better readability
       return text.split('\n').map((paragraph, i) => (
-        <p key={i} className={i > 0 ? 'mt-4' : ''}>{paragraph}</p>
+        paragraph.trim() ? <p key={i} className={i > 0 ? 'mt-4' : ''}>{paragraph}</p> : <br key={i} />
       ));
     }
   };
@@ -87,9 +95,11 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
   };
 
   // Calculate statistics
-  const wordCount = transcript.split(/\s+/).length;
+  const wordCount = transcript.split(/\s+/).filter(word => word.trim().length > 0).length;
   const speakerATurns = (transcript.match(/\[SPEAKER_A\]/g) || []).length;
   const speakerBTurns = (transcript.match(/\[SPEAKER_B\]/g) || []).length;
+  
+  // Try to extract duration from transcript
   const durationMatch = transcript.match(/(\d+\.\d+)s/);
   const duration = durationMatch ? parseFloat(durationMatch[1]).toFixed(1) : "N/A";
 

@@ -1,4 +1,4 @@
-// Updated FileUpload.tsx
+// components/FileUpload.tsx
 import React, { useState, useRef } from 'react';
 
 interface FileUploadProps {
@@ -24,6 +24,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
   const [dragActive, setDragActive] = useState(false);
   const [uploadXhr, setUploadXhr] = useState<XMLHttpRequest | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [taskId, setTaskId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Validate file type - prioritizing WAV and MP3 formats (most compatible)
@@ -130,6 +131,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
     
     // Reset uploading state
     setIsUploading(false);
+    setIsProcessing(false);
     setUploadProgress(0);
   };
 
@@ -143,6 +145,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
     clearTranscription();
     
     setIsUploading(true);
+    setIsProcessing(false); // Make sure we start in the upload phase
     setUploadProgress(0);
     const formData = new FormData();
     formData.append('file', fileToUpload);
@@ -168,8 +171,90 @@ const FileUpload: React.FC<FileUploadProps> = ({
           startProcessing();
           
           // Parse response
-          const response = JSON.parse(xhr.responseText);
-          onUploadResponse(response.transcript, response.download_url);
+          try {
+            const response = JSON.parse(xhr.responseText);
+            console.log("Upload response:", response);
+            
+            // If the response contains a task_id, start monitoring progress with WebSocket
+            if (response.task_id) {
+              setTaskId(response.task_id);
+              
+              // Set up WebSocket connection for progress monitoring
+              const ws = new WebSocket(`ws://localhost:8000/ws/progress/${response.task_id}`);
+              
+              ws.onopen = () => {
+                console.log("WebSocket connection opened for processing progress");
+              };
+              
+              ws.onmessage = (event) => {
+                try {
+                  const data = JSON.parse(event.data);
+                  console.log("Processing progress:", data);
+                  
+                  // Update progress
+                  setUploadProgress(data.progress);
+                  
+                  // When processing is complete
+                  if (data.progress >= 100) {
+                    setIsProcessing(false);
+                    
+                    // Fetch the result
+                    fetch(`http://localhost:8000/task/${response.task_id}/result`)
+                      .then(response => response.json())
+                      .then(result => {
+                        console.log("Task result:", result);
+                        
+                        if (result.error) {
+                          throw new Error(result.error);
+                        }
+                        
+                        if (!result.download_url) {
+                          throw new Error("No download URL in response");
+                        }
+                        
+                        // Fetch the transcript content
+                        return fetch(`http://localhost:8000${result.download_url}`)
+                          .then(response => response.text())
+                          .then(transcript => {
+                            console.log("Got transcript, length:", transcript.length);
+                            if (transcript) {
+                              onUploadResponse(transcript, result.download_url);
+                            } else {
+                              throw new Error("Empty transcript received");
+                            }
+                          });
+                      })
+                      .catch(error => {
+                        console.error("Error fetching transcription:", error);
+                        setFileError(`Error: ${error.message}`);
+                      })
+                      .finally(() => {
+                        ws.close();
+                      });
+                  }
+                } catch (error) {
+                  console.error("Error parsing WebSocket message:", error);
+                }
+              };
+              
+              ws.onerror = (error) => {
+                console.error("WebSocket error:", error);
+              };
+              
+              ws.onclose = () => {
+                console.log("WebSocket connection closed");
+              };
+            } else if (response.transcript && response.download_url) {
+              // Direct response with transcript (legacy mode)
+              onUploadResponse(response.transcript, response.download_url);
+            } else {
+              throw new Error("Invalid response format from server");
+            }
+          } catch (error) {
+            console.error("Error parsing response:", error);
+            setFileError(`Server error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            setIsProcessing(false);
+          }
         } else {
           throw new Error(`Error: ${xhr.statusText}`);
         }
@@ -177,18 +262,23 @@ const FileUpload: React.FC<FileUploadProps> = ({
 
       xhr.onerror = function() {
         setUploadXhr(null);
-        throw new Error('Network error occurred');
+        setFileError("Network error occurred during upload");
+        setIsUploading(false);
+        setIsProcessing(false);
       };
 
       xhr.onabort = function() {
         console.log('Upload aborted');
+        setIsUploading(false);
+        setIsProcessing(false);
       };
 
       xhr.send(formData);
     } catch (error) {
       console.error('Upload failed:', error);
-      alert('There was an error uploading your file.');
+      setFileError(`Upload error: ${error instanceof Error ? error.message : 'Unknown error'}`);
       setIsUploading(false);
+      setIsProcessing(false);
       setUploadXhr(null);
     }
   };

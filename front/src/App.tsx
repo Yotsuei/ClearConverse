@@ -35,15 +35,19 @@ const App: React.FC = () => {
 
   // Handle file selection - automatically show the audio player
   const handleFileSelected = (file: File) => {
-    // Reset states
+    // Reset transcription but keep other states
     setTranscript('');
     setDownloadUrl('');
     setSelectedFile(file);
     
     // Create a URL for audio preview - show audio player immediately
-    if (file) {
+    if (file && file.size > 0) { // Only create URL for non-empty files
       const url = URL.createObjectURL(file);
       setAudioUrl(url);
+      setShowAudioPlayer(true);
+    } else if (file) {
+      // For empty files (likely from URL component), keep the audio player
+      // but don't create a new object URL
       setShowAudioPlayer(true);
     } else {
       setAudioUrl('');
@@ -54,16 +58,19 @@ const App: React.FC = () => {
   // Clean up object URLs on unmount or when file changes
   useEffect(() => {
     return () => {
-      if (audioUrl) {
+      if (audioUrl && !audioUrl.startsWith('http')) {
         URL.revokeObjectURL(audioUrl);
       }
     };
   }, [audioUrl]);
 
   const handleUploadResponse = (transcriptText: string, url: string) => {
-    setTranscript(transcriptText);
-    setDownloadUrl(url);
+    console.log("Setting transcript:", transcriptText?.substring(0, 50) + "...");
+    console.log("Setting download URL:", url);
+    setTranscript(transcriptText || ""); // Ensure we always set a string
+    setDownloadUrl(url || "");
     setIsProcessing(false);
+    setIsUploading(false);
   };
 
   const startProcessing = () => {
@@ -78,7 +85,7 @@ const App: React.FC = () => {
   };
 
   const handleReset = () => {
-    if (selectedFile) {
+    if (selectedFile && audioUrl && !audioUrl.startsWith('http')) {
       URL.revokeObjectURL(audioUrl);
     }
     // Return to main menu
@@ -118,6 +125,14 @@ const App: React.FC = () => {
       </div>
     </div>
   );
+
+  // Debug function to check if transcript exists
+  const debugTranscript = () => {
+    console.log("Transcript exists:", !!transcript);
+    console.log("Transcript length:", transcript?.length || 0);
+    console.log("First 50 chars:", transcript?.substring(0, 50) || "empty");
+    console.log("Download URL:", downloadUrl);
+  };
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-200 py-12 px-4">
@@ -188,9 +203,20 @@ const App: React.FC = () => {
                 audioUrl={audioUrl} 
                 onTranscribe={() => {
                   // You can add functionality here if needed
+                  console.log("Transcribe clicked from AudioPlayer");
                 }}
               />
             </div>
+          )}
+          
+          {/* Debug button in development */}
+          {process.env.NODE_ENV === 'development' && (
+            <button 
+              onClick={debugTranscript}
+              className="mt-4 px-3 py-1 bg-purple-800 text-white text-xs rounded"
+            >
+              Debug Transcript
+            </button>
           )}
         </div>
         
