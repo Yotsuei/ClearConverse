@@ -310,8 +310,8 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
     // Clear any previous transcription
     clearTranscription();
     
-    if (!url || !isValidUrl || !audioLoaded) {
-      setUrlError('Please load the audio first');
+    if (!url || !isValidUrl) {
+      setUrlError('Please enter a valid audio URL');
       return;
     }
     

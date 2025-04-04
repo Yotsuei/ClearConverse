@@ -10,7 +10,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ onSelectModule }) => {
     <div className="w-full max-w-4xl mx-auto">
       <div className="text-center mb-10">
         <h1 className="text-5xl font-extrabold text-gray-100 mb-4">
-          Speech <span className="text-blue-400">Transcription</span> Tool
+          Audio <span className="text-blue-400">Transcription</span> Tool
         </h1>
         <p className="text-xl text-gray-400 max-w-3xl mx-auto">
           Choose one of the options below to convert speech to text using our advanced transcription technology.
