@@ -849,7 +849,8 @@ async def process_url_with_progress(task_id: str, url: str):
                 os.remove(temp_file_path)
                 logging.info(f"Removed temporary file: {temp_file_path}")
             except Exception as e:
-                logging.error(f"Error removing temporary file {temp_file_path}: {e}")
+                logging.error(f"Error in url processing : {e}")
+                raise HTTPException(status_code=500, detail=str(e))
 
 async def download_file_with_progress(url, task_id):
     """
