@@ -1,5 +1,5 @@
-// components/FileUpload.tsx
-import React, { useState } from 'react';
+// Updated FileUpload.tsx
+import React, { useState, useRef } from 'react';
 
 interface FileUploadProps {
   onFileSelected: (file: File) => void;
@@ -24,6 +24,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
   const [dragActive, setDragActive] = useState(false);
   const [uploadXhr, setUploadXhr] = useState<XMLHttpRequest | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Validate file type - prioritizing WAV and MP3 formats (most compatible)
   const isValidFileType = (file: File): boolean => {
@@ -79,6 +80,9 @@ const FileUpload: React.FC<FileUploadProps> = ({
       setFileError(null);
       setFile(selectedFile);
       onFileSelected(selectedFile);
+      
+      // Auto-start transcription after file selection
+      handleUpload(selectedFile);
     }
   };
 
@@ -112,6 +116,9 @@ const FileUpload: React.FC<FileUploadProps> = ({
       setFileError(null);
       setFile(droppedFile);
       onFileSelected(droppedFile);
+      
+      // Auto-start transcription after file drop
+      handleUpload(droppedFile);
     }
   };
 
@@ -126,8 +133,8 @@ const FileUpload: React.FC<FileUploadProps> = ({
     setUploadProgress(0);
   };
 
-  const handleUpload = async () => {
-    if (!file) {
+  const handleUpload = async (fileToUpload: File = file) => {
+    if (!fileToUpload) {
       alert('Please select a file first.');
       return;
     }
@@ -138,7 +145,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
     setIsUploading(true);
     setUploadProgress(0);
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append('file', fileToUpload);
 
     try {
       // Implement XMLHttpRequest for progress tracking
@@ -186,21 +193,6 @@ const FileUpload: React.FC<FileUploadProps> = ({
     }
   };
 
-  const handleCompleteReset = () => {
-    // Reset the file state
-    setFile(null);
-    setFileError(null);
-    
-    // Reset file input
-    const fileInput = document.getElementById('fileInput') as HTMLInputElement;
-    if (fileInput) {
-      fileInput.value = '';
-    }
-    
-    // Clear any transcription
-    clearTranscription();
-  };
-
   return (
     <div className="flex flex-col items-center">
       <h2 className="text-xl font-bold text-gray-200 mb-4">Upload Audio File</h2>
@@ -215,9 +207,10 @@ const FileUpload: React.FC<FileUploadProps> = ({
         onDragLeave={handleDrag}
         onDragOver={handleDrag}
         onDrop={handleDrop}
-        onClick={() => document.getElementById('fileInput')?.click()}
+        onClick={() => fileInputRef.current?.click()}
       >
         <input
+          ref={fileInputRef}
           id="fileInput"
           type="file"
           accept=".wav,.mp4,.mp3,.webm,.ogg"
@@ -264,6 +257,9 @@ const FileUpload: React.FC<FileUploadProps> = ({
               e.stopPropagation();
               setFile(null);
               clearTranscription();
+              if (fileInputRef.current) {
+                fileInputRef.current.value = '';
+              }
             }}
             className="ml-2 text-gray-400 hover:text-red-400"
           >
@@ -274,19 +270,8 @@ const FileUpload: React.FC<FileUploadProps> = ({
         </div>
       )}
       
-      {!uploadXhr ? (
-        <button
-          onClick={handleUpload}
-          disabled={!file}
-          className={`w-full py-3 px-5 text-white font-bold rounded-lg transition-all duration-300 
-            ${!file 
-              ? 'bg-gray-600 cursor-not-allowed' 
-              : 'bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg'}`
-          }
-        >
-          Upload & Transcribe
-        </button>
-      ) : (
+      {/* Show cancel button only during upload */}
+      {uploadXhr && (
         <button
           onClick={handleCancelUpload}
           className="w-full py-3 px-5 text-white font-bold rounded-lg transition-all duration-300 
@@ -295,7 +280,6 @@ const FileUpload: React.FC<FileUploadProps> = ({
           Cancel Upload
         </button>
       )}
-
     </div>
   );
 };

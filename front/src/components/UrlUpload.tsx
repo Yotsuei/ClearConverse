@@ -49,18 +49,23 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
         // Basic URL validation passed
         setIsValidUrl(true);
         
-        // Advanced validation can be added here if needed
-        const audioExtensions = ['.mp3', '.wav', '.ogg', '.m4a', '.flac', '.mp4'];
-        const hasAudioExtension = audioExtensions.some(ext => 
-          inputUrl.toLowerCase().endsWith(ext)
-        );
-        
-        if (!hasAudioExtension && 
-            !inputUrl.includes('drive.google.com') && 
-            !inputUrl.includes('dropbox.com') &&
-            !inputUrl.includes('storage.googleapis.com')) {
-          // Just a warning, don't invalidate URL
-          setUrlError('Warning: URL doesn\'t appear to be an audio file or from a recognized service.');
+        // Check for Google Drive links and provide more specific guidance
+        if (inputUrl.includes('drive.google.com')) {
+          // Not an error, just a note
+          setUrlError('Note: Google Drive links need to be shared with "Anyone with the link" and direct download links.');
+        } else {
+          // Advanced validation for audio extensions
+          const audioExtensions = ['.mp3', '.wav', '.ogg', '.m4a', '.flac', '.mp4'];
+          const hasAudioExtension = audioExtensions.some(ext => 
+            inputUrl.toLowerCase().endsWith(ext)
+          );
+          
+          if (!hasAudioExtension && 
+              !inputUrl.includes('storage.googleapis.com') && 
+              !inputUrl.includes('dropbox.com')) {
+            // Just a warning, don't invalidate URL
+            setUrlError('URL may not be a direct audio file link. Ensure it points directly to an audio file.');
+          }
         }
       } catch (e) {
         setIsValidUrl(false);
@@ -115,7 +120,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
             // Scale from 30-100 to 0-100
             const scaledProgress = ((data.progress - 30) / (100 - 30)) * 100;
             startProcessing(); // Ensure processing mode is active
-            setUploadProgress(100); // Upload is complete
+            setUploadProgress(Math.min(Math.round(scaledProgress), 99)); // Cap at 99% until complete
           }
           
           // Add message display if you want to show server messages
@@ -128,6 +133,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
           if (data.progress >= 100) {
             setIsUploading(false);
             setIsProcessing(false);
+            setUploadProgress(100);
             
             // Fetch the result
             fetch(`http://localhost:8000/task/${taskId}/result`)
@@ -177,7 +183,42 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
     }
   }, [taskId]);
 
-  // First step: Load the audio without transcribing
+  // Convert Google Drive link to direct download link
+  const convertGoogleDriveLink = (driveUrl: string): string => {
+    // Extract file ID from Google Drive sharing URLs
+    let fileId = '';
+    
+    // Pattern for "drive.google.com/file/d/FILE_ID/view" format
+    const filePattern = /\/file\/d\/([^\/]+)/;
+    const fileMatch = driveUrl.match(filePattern);
+    
+    // Pattern for "drive.google.com/open?id=FILE_ID" format
+    const openPattern = /[?&]id=([^&]+)/;
+    const openMatch = driveUrl.match(openPattern);
+    
+    // Pattern for "drive.google.com/drive/folders/FILE_ID" format
+    const folderPattern = /\/folders\/([^\/\?]+)/;
+    const folderMatch = driveUrl.match(folderPattern);
+    
+    if (fileMatch && fileMatch[1]) {
+      fileId = fileMatch[1];
+    } else if (openMatch && openMatch[1]) {
+      fileId = openMatch[1];
+    } else if (folderMatch && folderMatch[1]) {
+      return ''; // Cannot directly download a folder
+    } else {
+      return ''; // Unknown format
+    }
+    
+    if (fileId) {
+      // Return direct download link format
+      return `https://drive.google.com/uc?export=download&id=${fileId}`;
+    }
+    
+    return driveUrl; // Return original if couldn't convert
+  };
+
+  // Load the audio for preview before transcribing
   const handleLoadAudio = async () => {
     if (!url || !isValidUrl) {
       setUrlError('Please enter a valid URL');
@@ -190,46 +231,71 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
     setUrlError(null);
     
     try {
-      // Create a URL object to validate
-      new URL(url);
+      let processedUrl = url;
       
-      // Use a proxy/cors approach or direct if allowed
-      // For this example, we'll create a blob URL for the audio
-      // In a real implementation, you might need to download via backend
+      // Check if it's a Google Drive link and convert if needed
+      if (url.includes('drive.google.com')) {
+        const convertedUrl = convertGoogleDriveLink(url);
+        if (!convertedUrl) {
+          throw new Error('Could not convert Google Drive link. Make sure it\'s a file, not a folder.');
+        }
+        processedUrl = convertedUrl;
+        console.log("Converted URL:", processedUrl);
+      }
       
-      // Create a temporary audio element to test loading
+      // Create a proxy URL if needed (for CORS issues)
+      // Note: In a production environment, you would handle this server-side
+      // This is just for demonstration purposes
+      const proxyUrl = `http://localhost:8000/proxy?url=${encodeURIComponent(processedUrl)}`;
+      
+      // Test audio loading with a temporary audio element
       const audio = new Audio();
       
-      // Set up event listeners
       audio.onloadeddata = () => {
-        // Create a blob URL from the audio 
-        // (In a real implementation, you should download the file)
+        // Create a blob URL from the audio for preview
+        setAudioUrl(processedUrl); // Use original URL or processed URL
         
-        // Here we'll "fake" the audio loading by just passing the URL directly
-        // which works for many direct audio URLs but not for services that require authentication
+        // Create a temporary file object for the parent component
+        const fileName = processedUrl.split('/').pop() || 'audio_from_url.mp3';
+        const mimeType = fileName.endsWith('.mp3') ? 'audio/mpeg' : 
+                        fileName.endsWith('.wav') ? 'audio/wav' : 'audio/mpeg';
         
-        // Create a blob with metadata for the file props
-        const temporaryBlob = new Blob(['audio content'], { type: 'audio/mpeg' });
-        const fileName = url.split('/').pop() || 'audio_from_url.mp3';
-        const file = new File([temporaryBlob], fileName, { type: 'audio/mpeg' });
+        // Create a minimal blob to represent the remote file
+        const placeholderBlob = new Blob(['audio placeholder'], { type: mimeType });
+        const file = new File([placeholderBlob], fileName, { 
+          type: mimeType,
+          lastModified: new Date().getTime()
+        });
         
         // Pass file to parent component
         onFileSelected(file);
         
-        // Set the audio URL for direct playing
-        setAudioUrl(url);
         setAudioLoaded(true);
         setIsLoading(false);
       };
       
-      audio.onerror = () => {
-        setUrlError('Error loading audio from URL. Make sure it\'s a direct link to an audio file.');
+      audio.onerror = (e) => {
+        console.error("Audio loading error:", e);
+        setUrlError('Error loading audio from URL. Make sure it\'s a direct link to an audio file that\'s publicly accessible.');
         setIsLoading(false);
       };
       
-      // Start loading the audio
-      audio.src = url;
+      // Set a timeout in case the audio loading hangs
+      const timeoutId = setTimeout(() => {
+        if (!audioLoaded) {
+          audio.src = '';
+          setUrlError('Timeout while loading audio. The URL might be inaccessible or not a direct audio file link.');
+          setIsLoading(false);
+        }
+      }, 15000); // 15 second timeout
+      
+      // Try to load the audio
+      audio.crossOrigin = "anonymous";
+      audio.src = processedUrl; // Try direct URL first
       audio.load();
+      
+      // Clean up timeout
+      return () => clearTimeout(timeoutId);
       
     } catch (error) {
       console.error('URL loading failed:', error);
@@ -239,9 +305,9 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
     }
   };
 
-  // Second step: Transcribe the audio (called after preview)
+  // Second step: Transcribe the audio
   const handleTranscribe = async () => {
-    // Clear any previous transcription when uploading
+    // Clear any previous transcription
     clearTranscription();
     
     if (!url || !isValidUrl || !audioLoaded) {
@@ -253,6 +319,16 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
     setUploadProgress(5); // Start with a small initial progress
     setUrlError(null);
     
+    let processedUrl = url;
+    
+    // Check if it's a Google Drive link and convert if needed
+    if (url.includes('drive.google.com')) {
+      const convertedUrl = convertGoogleDriveLink(url);
+      if (convertedUrl) {
+        processedUrl = convertedUrl;
+      }
+    }
+    
     try {
       // Using the dedicated URL transcription endpoint
       const response = await fetch('http://localhost:8000/transcribe-url', {
@@ -260,7 +336,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: `url=${encodeURIComponent(url)}`
+        body: `url=${encodeURIComponent(processedUrl)}`
       });
       
       if (!response.ok) {
@@ -342,13 +418,25 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
           )}
         </div>
         {urlError && (
-          <p className={`mt-1 text-sm ${urlError.startsWith('Warning') ? 'text-yellow-400' : 'text-red-400'}`}>
+          <p className={`mt-1 text-sm ${urlError.startsWith('Note') ? 'text-blue-400' : urlError.startsWith('URL may') ? 'text-yellow-400' : 'text-red-400'}`}>
             {urlError}
           </p>
         )}
         <p className="mt-1 text-sm text-gray-400">
           Enter the direct URL to an audio file. The URL must be publicly accessible.
         </p>
+        
+        {/* Google Drive specific helper */}
+        {url && url.includes('drive.google.com') && (
+          <div className="mt-2 p-2 bg-blue-900/30 border border-blue-800 rounded-lg text-xs text-blue-300">
+            <p className="font-medium mb-1">Google Drive Links:</p>
+            <ol className="list-decimal list-inside space-y-1 ml-1">
+              <li>Open your Google Drive file</li>
+              <li>Click "Share" and set access to "Anyone with the link"</li>
+              <li>For best results, use the direct download link format</li>
+            </ol>
+          </div>
+        )}
       </div>
       
       {/* Step 1 - Load Audio Button (when not yet loaded) */}
@@ -381,7 +469,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
       )}
       
       {/* Step 2 - Transcribe Button (after audio is loaded) */}
-      {audioLoaded && !uploadXhr && (
+      {audioLoaded && !uploadXhr && !taskId && (
         <button
           onClick={handleTranscribe}
           className="w-full py-3 px-5 text-white font-bold rounded-lg transition-all duration-300 
@@ -392,7 +480,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
       )}
       
       {/* Cancel button (during transcription) */}
-      {uploadXhr && (
+      {(uploadXhr || taskId) && !(isUploading === false && isProcessing === false) && (
         <button
           onClick={handleCancelUpload}
           className="w-full py-3 px-5 text-white font-bold rounded-lg transition-all duration-300 
@@ -401,6 +489,15 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
           Cancel Transcription
         </button>
       )}
+      
+      {/* Additional help information */}
+      <div className="mt-6 bg-gray-700 p-3 rounded-lg text-sm border border-gray-600">
+        <h3 className="font-semibold text-gray-200 mb-1 flex items-center">
+          <svg className="w-4 h-4 mr-1 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+          </svg>
+        </h3>
+      </div>
     </div>
   );
 };
