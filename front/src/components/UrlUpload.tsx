@@ -11,10 +11,10 @@ interface UrlUploadProps {
   clearTranscription: () => void;
 }
 
-const UrlUpload: React.FC<UrlUploadProps> = ({
-  onFileSelected,
-  onUploadResponse,
-  setIsUploading,
+const UrlUpload: React.FC<UrlUploadProps> = ({ 
+  onFileSelected, 
+  onUploadResponse, 
+  setIsUploading, 
   setUploadProgress,
   setIsProcessing,
   startProcessing,
@@ -34,21 +34,21 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
   const handleUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const inputUrl = e.target.value;
     setUrl(inputUrl);
-
+    
     // Clear previous errors and states
     setUrlError(null);
     setAudioLoaded(false);
     setAudioUrl(null);
-
+    
     // Validate the URL (basic validation)
     if (inputUrl.trim() !== '') {
       try {
         // Check if it's a valid URL format
         new URL(inputUrl);
-
+        
         // Basic URL validation passed
         setIsValidUrl(true);
-
+        
         // Check for Google Drive links and provide more specific guidance
         if (inputUrl.includes('drive.google.com')) {
           // Not an error, just a note
@@ -56,13 +56,13 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
         } else {
           // Advanced validation for audio extensions
           const audioExtensions = ['.mp3', '.wav', '.ogg', '.m4a', '.flac', '.mp4'];
-          const hasAudioExtension = audioExtensions.some(ext =>
+          const hasAudioExtension = audioExtensions.some(ext => 
             inputUrl.toLowerCase().endsWith(ext)
           );
-
-          if (!hasAudioExtension &&
-            !inputUrl.includes('storage.googleapis.com') &&
-            !inputUrl.includes('dropbox.com')) {
+          
+          if (!hasAudioExtension && 
+              !inputUrl.includes('storage.googleapis.com') && 
+              !inputUrl.includes('dropbox.com')) {
             // Just a warning, don't invalidate URL
             setUrlError('URL may not be a direct audio file link. Ensure it points directly to an audio file.');
           }
@@ -81,13 +81,13 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
       uploadXhr.abort(); // Abort the XHR request
       setUploadXhr(null);
     }
-
+    
     // Close WebSocket connection if active
     if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
       wsConnection.close();
       setWsConnection(null);
     }
-
+    
     // Reset states
     setTaskId(null);
     setIsUploading(false);
@@ -99,39 +99,35 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
   useEffect(() => {
     if (taskId) {
       const ws = new WebSocket(`ws://localhost:8000/ws/progress/${taskId}`);
-
+      
       ws.onopen = () => {
         console.log(`WebSocket connection established for task ${taskId}`);
       };
-
+      
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
           console.log("Progress update:", data);
-
+          
           // Update progress based on the server message
-          if (data.progress <= 30) {
-            // First 30% is considered upload
+          setUploadProgress(data.progress);
+          
+          // Determine upload vs processing phase
+          if (data.progress < 30) {
             setIsUploading(true);
             setIsProcessing(false);
-            setUploadProgress(data.progress * (100 / 30)); // Scale to 0-100%
-          } else {
-            // After 30%, switch to processing mode
+          } else if (data.progress < 100) {
             setIsUploading(false);
             setIsProcessing(true);
-            // Scale from 30-100 to 0-100
-            const scaledProgress = ((data.progress - 30) / (100 - 30)) * 100;
-            startProcessing(); // Ensure processing mode is active
-            setUploadProgress(Math.min(Math.round(scaledProgress), 99)); // Cap at 99% until complete
+            startProcessing();
           }
-
+          
           // If processing is complete
           if (data.progress >= 100) {
             console.log("Processing complete, fetching result for task:", taskId);
             setIsUploading(false);
             setIsProcessing(false);
-            setUploadProgress(100);
-
+            
             // Fetch the result
             fetch(`http://localhost:8000/task/${taskId}/result`)
               .then(response => {
@@ -145,12 +141,12 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
                 if (result.error) {
                   throw new Error(result.error);
                 }
-
+                
                 // Check if the download_url exists
                 if (!result.download_url) {
                   throw new Error("No download URL in response");
                 }
-
+                
                 // Fetch transcript content
                 return fetch(`http://localhost:8000${result.download_url}`)
                   .then(response => {
@@ -183,18 +179,18 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
           console.error("Error parsing WebSocket message:", error);
         }
       };
-
+      
       ws.onerror = (error) => {
         console.error("WebSocket error:", error);
         setUrlError("Connection error while monitoring progress");
       };
-
+      
       ws.onclose = () => {
         console.log("WebSocket connection closed");
       };
-
+      
       setWsConnection(ws);
-
+      
       // Clean up WebSocket on unmount or when taskId changes
       return () => {
         if (ws.readyState === WebSocket.OPEN) {
@@ -209,43 +205,24 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
       setUrlError('Please enter a valid URL');
       return;
     }
-
+    
     setIsLoading(true);
     setAudioLoaded(false);
     setAudioUrl(null);
     setUrlError(null);
-
+    
     try {
-      // Create a simple audio element to check if the URL is accessible
-      const audio = new Audio();
-
-      // Set up audio event handlers
-      audio.onloadeddata = () => {
-        setAudioLoaded(true);
-        setIsLoading(false);
-
-        // Create a fake File object to use with the audio player
-        // This helps reuse the existing audio player component
-        const urlParts = url.split('/');
-        const fileName = urlParts[urlParts.length - 1] || 'audio-from-url.mp3';
-
-        // Create an empty file object that points to the URL
-        const fileObj = new File([new ArrayBuffer(0)], fileName, { type: 'audio/mpeg' });
-
-        // Pass the original URL to the parent for preview
-        setAudioUrl(url);
-        onFileSelected(fileObj);
-      };
-
-      audio.onerror = () => {
-        setUrlError('Error loading audio from URL. Ensure the URL points directly to an accessible audio file.');
-        setIsLoading(false);
-      };
-
-      // Load the audio file
-      audio.crossOrigin = "anonymous";
-      audio.src = url;
-      audio.load();
+      // We'll use a simpler approach to check URL validity - just set the state
+      // This avoids potential CORS issues with the Audio element
+      setAudioLoaded(true);
+      setIsLoading(false);
+      setAudioUrl(url);
+      
+      // Create a fake File object to use with the audio player
+      const urlParts = url.split('/');
+      const fileName = urlParts[urlParts.length - 1] || 'audio-from-url.mp3';
+      const fileObj = new File([new ArrayBuffer(0)], fileName, { type: 'audio/mpeg' });
+      onFileSelected(fileObj);
     } catch (error) {
       console.error('URL loading failed:', error);
       setUrlError(`Error: ${error instanceof Error ? error.message : 'Unknown error occurred'}`);
@@ -253,66 +230,71 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
     }
   };
 
-  // Transcribe the audio from URL
+  // Transcribe the audio from URL - using the original approach
   const handleTranscribe = async () => {
     clearTranscription();
     if (!url || !isValidUrl) {
       setUrlError('Please enter a valid audio URL');
       return;
     }
-
+    
     setIsUploading(true);
     setUploadProgress(5);
     setUrlError(null);
-
+    
     try {
-      // Send the URL to the backend for transcription
-      const response = await fetch('http://localhost:8000/transcribe-url', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `url=${encodeURIComponent(url)}`
-      });
-
-      // Handle error responses
-      if (!response.ok) {
-        let errorMessage = await response.text();
-        try {
-          const errorJson = JSON.parse(errorMessage);
-          errorMessage = errorJson.detail || `Error ${response.status}: ${response.statusText}`;
-        } catch (e) {
-          // If parsing fails, use the raw error message
+      // Create xhr for tracking and cancellation
+      const xhr = new XMLHttpRequest();
+      setUploadXhr(xhr);
+      
+      xhr.open('POST', 'http://localhost:8000/transcribe-url');
+      xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+      
+      xhr.onload = function() {
+        if (xhr.status === 200) {
+          // Parse response
+          try {
+            const response = JSON.parse(xhr.responseText);
+            console.log("Transcribe URL response:", response);
+            
+            if (response.task_id) {
+              setTaskId(response.task_id);
+              
+              // If preview URL is provided, use it
+              if (response.preview_url) {
+                const fullPreviewUrl = 
+                  response.preview_url.startsWith('http') 
+                    ? response.preview_url
+                    : `http://localhost:8000${response.preview_url}`;
+                
+                setAudioUrl(fullPreviewUrl);
+              }
+            } else {
+              throw new Error("Invalid response: missing task_id");
+            }
+          } catch (error) {
+            console.error("Error parsing response:", error);
+            setUrlError(`Server error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            setIsUploading(false);
+          }
+        } else {
+          setUrlError(`Server error: ${xhr.status} ${xhr.statusText}`);
+          setIsUploading(false);
         }
-        throw new Error(errorMessage);
-      }
-
-      // Process successful response
-      const result = await response.json();
-      console.log("Transcribe URL response:", result);
-
-      if (result.task_id) {
-        // Save the task ID for WebSocket progress tracking
-        setTaskId(result.task_id);
-
-        // If the response includes a preview URL, use it for audio playback
-        if (result.preview_url) {
-          // Make sure the preview URL has the correct host prefix
-          const previewUrl = result.preview_url.startsWith('http')
-            ? result.preview_url
-            : `http://localhost:8000${result.preview_url}`;
-
-          setAudioUrl(previewUrl);
-
-          // Create a fake file for the audio player
-          const urlParts = url.split('/');
-          const fileName = urlParts[urlParts.length - 1] || 'audio-from-url.mp3';
-          const fileObj = new File([new ArrayBuffer(0)], fileName, { type: 'audio/mpeg' });
-
-          // Notify parent component about the audio
-          onFileSelected(fileObj);
-        }
-      } else {
-        throw new Error("Invalid response from server: missing task_id");
-      }
+      };
+      
+      xhr.onerror = function() {
+        setUrlError("Network error occurred");
+        setIsUploading(false);
+      };
+      
+      xhr.onabort = function() {
+        console.log("URL upload aborted");
+        setIsUploading(false);
+      };
+      
+      // Send the request
+      xhr.send(`url=${encodeURIComponent(url)}`);
     } catch (error) {
       console.error('URL transcription failed:', error);
       setUrlError(`Error: ${error instanceof Error ? error.message : 'Unknown error occurred'}`);
@@ -341,7 +323,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
       <p className="text-gray-400 mb-6 text-center">
         Enter a direct URL to an audio file for transcription.
       </p>
-
+      
       <div className="mb-4">
         <label htmlFor="audio-url" className="block text-sm font-medium text-gray-300 mb-1">
           Audio URL
@@ -353,10 +335,11 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
             value={url}
             onChange={handleUrlChange}
             placeholder="https://example.com/audio.mp3"
-            className={`w-full p-3 pr-10 bg-gray-700 text-gray-200 border rounded-lg focus:outline-none focus:ring-2 ${url && !isValidUrl
-                ? 'border-red-500 focus:ring-red-500 focus:border-red-500'
+            className={`w-full p-3 pr-10 bg-gray-700 text-gray-200 border rounded-lg focus:outline-none focus:ring-2 ${
+              url && !isValidUrl 
+                ? 'border-red-500 focus:ring-red-500 focus:border-red-500' 
                 : 'border-gray-600 focus:ring-blue-500 focus:border-blue-500'
-              }`}
+            }`}
           />
           {url && (
             <button
@@ -378,7 +361,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
         <p className="mt-1 text-sm text-gray-400">
           Enter the direct URL to an audio file. The URL must be publicly accessible.
         </p>
-
+        
         {/* Google Drive specific helper */}
         {url && url.includes('drive.google.com') && (
           <div className="mt-2 p-2 bg-blue-900/30 border border-blue-800 rounded-lg text-xs text-blue-300">
@@ -391,7 +374,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
           </div>
         )}
       </div>
-
+      
       {/* Step 1 - Load Audio Button (when not yet loaded) */}
       {!audioLoaded && !isLoading && !taskId && (
         <button
@@ -399,14 +382,14 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
           disabled={!url || !isValidUrl}
           className={`w-full py-3 px-5 text-white font-bold rounded-lg transition-all duration-300 
             ${!url || !isValidUrl
-              ? 'bg-gray-600 cursor-not-allowed'
+              ? 'bg-gray-600 cursor-not-allowed' 
               : 'bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg'}`
           }
         >
           Load Audio from URL
         </button>
       )}
-
+      
       {/* Loading indicator */}
       {isLoading && (
         <button
@@ -420,7 +403,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
           Loading Audio...
         </button>
       )}
-
+      
       {/* Step 2 - Transcribe Button (after audio is loaded) */}
       {audioLoaded && !taskId && (
         <button
@@ -431,7 +414,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
           Transcribe Audio
         </button>
       )}
-
+      
       {/* Cancel button (during transcription) */}
       {taskId && (isUploading || isProcessing) && (
         <button
@@ -442,7 +425,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
           Cancel Transcription
         </button>
       )}
-
+      
       {/* Additional help information */}
       <div className="mt-6 bg-gray-700 p-3 rounded-lg text-sm border border-gray-600">
         <h3 className="font-semibold text-gray-200 mb-1 flex items-center">
