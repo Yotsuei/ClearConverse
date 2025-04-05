@@ -755,9 +755,6 @@ processor = EnhancedAudioProcessor(config)
 progress_store: Dict[str, Dict] = {}
 result_store: Dict[str, Dict] = {}
 
-import atexit
-atexit.register(lambda: scheduler.shutdown())
-
 def convert_google_drive_url(drive_url: str) -> str:
     """
     Convert a Google Drive sharing URL into a direct download URL.
