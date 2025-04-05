@@ -755,20 +755,6 @@ processor = EnhancedAudioProcessor(config)
 progress_store: Dict[str, Dict] = {}
 result_store: Dict[str, Dict] = {}
 
-CLEANUP_THRESHOLD = timedelta(minutes=30)
-
-def cleanup_old_tasks():
-    """Delete task folders in OUTPUT_DIR older than CLEANUP_THRESHOLD."""
-    now = datetime.now()
-    for task_folder in Path(OUTPUT_DIR).iterdir():
-        if task_folder.is_dir():
-            # Get folder's last modified time
-            folder_mtime = datetime.fromtimestamp(task_folder.stat().st_mtime)
-            if now - folder_mtime > CLEANUP_THRESHOLD:
-                logging.info(f"Cleaning up old task folder: {task_folder}")
-                shutil.rmtree(task_folder)
-
-# Make sure to shut down the scheduler when the app exits.
 import atexit
 atexit.register(lambda: scheduler.shutdown())
 
