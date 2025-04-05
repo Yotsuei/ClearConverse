@@ -886,6 +886,25 @@ async def preview_audio(filename: str):
     return FileResponse(str(file_path), media_type="audio/mpeg", filename=filename)
 
 # -----------------------------------------------------------------------------
+# Endpoint: Get Transcription
+# -----------------------------------------------------------------------------
+@app.get("/transcription/{task_id}")
+async def get_transcription(task_id: str):
+    # Construct the path to the transcript file based on the task ID
+    transcript_file = Path(OUTPUT_DIR) / task_id / "transcript.txt"
+    
+    # If the file doesn't exist, return a 404 error
+    if not transcript_file.exists():
+        raise HTTPException(status_code=404, detail="Transcription not found")
+    
+    # Read the transcription content
+    with open(transcript_file, "r", encoding="utf-8") as f:
+        transcript = f.read()
+    
+    # Return the task ID and transcription as JSON
+    return JSONResponse(content={"task_id": task_id, "transcription": transcript})
+
+# -----------------------------------------------------------------------------
 # Endpoint: Check Task Result
 # -----------------------------------------------------------------------------
 @app.get("/task/{task_id}/result")
