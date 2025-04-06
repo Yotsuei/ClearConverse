@@ -1,7 +1,7 @@
 // App.tsx
 import React, { useState, useRef, useEffect } from 'react';
 import FileUpload from './components/FileUpload';
-import AudioRecorder from './components/AudioRecorder';
+import UrlUpload from './components/UrlUpload';
 import AudioPlayer from './components/AudioPlayer';
 import TranscriptionDisplay from './components/TranscriptionDisplay';
 import MainMenu from './components/MainMenu';
@@ -16,7 +16,7 @@ type AudioSource = {
   url: string | null;
 };
 
-type Module = 'upload' | 'record';
+type Module = 'upload' | 'url';
 
 const App: React.FC = () => {
   const [showMainMenu, setShowMainMenu] = useState<boolean>(true);
@@ -119,38 +119,6 @@ const App: React.FC = () => {
     setDownloadUrl(null);
   };
 
-  const handleRecordingComplete = (blob: Blob) => {
-    // Get the correct MIME type and extension from the blob
-    let fileExtension = '.webm'; // Default extension
-    
-    // Map MIME types to file extensions
-    if (blob.type.includes('mp4')) {
-      fileExtension = '.mp4';
-    } else if (blob.type.includes('ogg')) {
-      fileExtension = '.ogg';
-    } else if (blob.type.includes('wav')) {
-      fileExtension = '.wav';
-    }
-    
-    console.log(`Recording blob received with type: ${blob.type}, using extension: ${fileExtension}`);
-    
-    // Create file with the correct MIME type - this is critical!
-    const file = new File([blob], `recording${fileExtension}`, { type: blob.type });
-    
-    // Clear previous object URL if exists
-    if (audioSource.url) {
-      revokeObjectURL(audioSource.url);
-    }
-    
-    // Create and track new object URL
-    const url = createObjectURL(blob);
-    setAudioSource({ file, url });
-    
-    // Clear transcript when creating a new recording
-    setTranscript(null);
-    setDownloadUrl(null);
-  };
-
   const resetState = () => {
     // Cancel any ongoing requests first
     cancelTranscription();
@@ -234,7 +202,7 @@ const App: React.FC = () => {
   // Start transcription process with the uploaded file
   const startTranscription = async () => {
     if (!taskId) {
-      alert('No task ID available. Please upload a file first.');
+      alert('No task ID available. Please upload a file or URL first.');
       return;
     }
     
@@ -260,80 +228,14 @@ const App: React.FC = () => {
     }
   };
 
-  // Handle transcription from either audio player or recorder
+  // Handle transcription from either audio player
   const handleTranscribe = () => {
-    if (!audioSource.file) return;
-    
-    if (activeModule === 'upload') {
-      // For upload module, the file should already be uploaded
-      // Just start the transcription process
-      if (taskId) {
-        startTranscription();
-      } else {
-        alert('Please upload a file first.');
-      }
-    } else if (activeModule === 'record') {
-      // For recording module, we need to upload the file first, then start transcription
-      setIsUploading(true);
-      setUploadProgress(0);
-      
-      const formData = new FormData();
-      formData.append('file', audioSource.file);
-
-      try {
-        // Implement XMLHttpRequest for progress tracking
-        const xhr = new XMLHttpRequest();
-        xhrRef.current = xhr;
-        
-        xhr.open('POST', 'http://localhost:8000/upload-file');
-        
-        xhr.upload.addEventListener('progress', (event) => {
-          if (event.lengthComputable) {
-            const progress = Math.round((event.loaded / event.total) * 100);
-            setUploadProgress(progress);
-          }
-        });
-
-        xhr.onload = function() {
-          xhrRef.current = null;
-          if (xhr.status === 200) {
-            setIsUploading(false);
-            
-            // Parse response
-            const response = JSON.parse(xhr.responseText);
-            
-            // Set task ID and start transcription
-            if (response.task_id) {
-              setTaskId(response.task_id);
-              startTranscription();
-            } else {
-              throw new Error('No task ID returned from server');
-            }
-          } else {
-            throw new Error(`Server error: ${xhr.status} ${xhr.statusText}`);
-          }
-        };
-
-        xhr.onerror = function() {
-          xhrRef.current = null;
-          setIsUploading(false);
-          console.error('Network error occurred');
-          alert('Network error occurred. Please check your connection and try again.');
-        };
-
-        xhr.onabort = function() {
-          console.log('Upload request aborted');
-          setIsUploading(false);
-        };
-
-        xhr.send(formData);
-      } catch (error) {
-        console.error('Upload failed:', error);
-        alert(`There was an error uploading your file: ${(error as Error).message}`);
-        setIsUploading(false);
-        xhrRef.current = null;
-      }
+    if (!taskId) {
+      alert('Please upload a file or URL first.');
+      return;
     }
+    
+    startTranscription();
   };
 
   // Render different content based on the active module
@@ -374,23 +276,38 @@ const App: React.FC = () => {
           )}
         </>
       );
-    } else if (activeModule === 'record') {
+    } else if (activeModule === 'url') {
       return (
         <>
           <div className="bg-gray-750 rounded-lg p-6 mb-6 border border-gray-700">
-            <AudioRecorder 
-              onRecordingComplete={handleRecordingComplete} 
-              onTranscribe={audioSource.file ? handleTranscribe : undefined}
+            <UrlUpload 
+              onFileSelected={handleFileSelected}
+              setTaskId={setTaskId}
+              setIsUploading={setIsUploading}
+              setUploadProgress={setUploadProgress}
+              clearTranscription={clearTranscription}
             />
           </div>
 
-          {/* Audio Player - only shown after recording is completed */}
+          {/* Audio Player - shown after URL preview is available */}
           {audioSource.url && !isUploading && !isProcessing && (
             <div className="mt-6">
               <AudioPlayer 
                 audioUrl={audioSource.url} 
                 onTranscribe={handleTranscribe}
               />
+            </div>
+          )}
+
+          {/* Transcribe button - only show when we have a task ID but no transcription yet */}
+          {taskId && !transcript && !isUploading && !isProcessing && (
+            <div className="mt-6">
+              <button
+                onClick={handleTranscribe}
+                className="w-full py-3 px-5 mt-2 text-white font-bold rounded-lg transition-all duration-300 bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg"
+              >
+                Start Transcription
+              </button>
             </div>
           )}
         </>
@@ -417,7 +334,7 @@ const App: React.FC = () => {
         <div className="w-full max-w-3xl bg-gray-800 shadow-xl rounded-xl p-8 border border-gray-700">
           <div className="flex justify-between items-center mb-6">
             <h1 className="text-3xl font-extrabold tracking-tight text-gray-100">
-              {activeModule === 'upload' ? 'File Upload Transcription' : 'Audio Recording Transcription'}
+              {activeModule === 'upload' ? 'File Upload Transcription' : 'URL Upload Transcription'}
             </h1>
             <button 
               onClick={goToMainMenu}
@@ -493,6 +410,17 @@ const App: React.FC = () => {
           isProcessing={isUploading || isProcessing}
           hasTranscription={Boolean(transcript)}
         />
+      )}
+      
+      {/* Floating ClearButton - only show when both audio and transcript exist */}
+      {!showMainMenu && audioSource.file && transcript && !isUploading && !isProcessing && (
+        <div className="fixed bottom-6 left-6 z-10">
+          <ClearButton 
+            onClear={clearAll}
+            isProcessing={false}
+            includeAudio={true}
+          />
+        </div>
       )}
       
       <footer className="mt-8 text-center text-gray-500 text-sm">
