@@ -2,19 +2,19 @@
 import React, { useState } from 'react';
 
 interface FileUploadProps {
-  onFileSelected: (file: File) => void;
   setTaskId: (taskId: string) => void;
   setIsUploading: (isUploading: boolean) => void;
   setUploadProgress: (progress: number) => void;
   clearTranscription: () => void;
+  onUploadSuccess: (previewUrl: string) => void; // Add this
 }
 
 const FileUpload: React.FC<FileUploadProps> = ({ 
-  onFileSelected, 
   setTaskId,
   setIsUploading, 
   setUploadProgress,
-  clearTranscription
+  clearTranscription,
+  onUploadSuccess // Add this
 }) => {
   const [file, setFile] = useState<File | null>(null);
   const [dragActive, setDragActive] = useState(false);
@@ -77,7 +77,6 @@ const FileUpload: React.FC<FileUploadProps> = ({
       
       setFileError(null);
       setFile(selectedFile);
-      onFileSelected(selectedFile);
     }
   };
 
@@ -110,7 +109,6 @@ const FileUpload: React.FC<FileUploadProps> = ({
       
       setFileError(null);
       setFile(droppedFile);
-      onFileSelected(droppedFile);
     }
   };
 
@@ -130,9 +128,6 @@ const FileUpload: React.FC<FileUploadProps> = ({
       alert('Please select a file first.');
       return;
     }
-
-    // Clear any previous transcription when uploading
-    clearTranscription();
     
     setIsUploading(true);
     setUploadProgress(0);
@@ -163,8 +158,12 @@ const FileUpload: React.FC<FileUploadProps> = ({
           
           if (response.task_id) {
             console.log('File uploaded. Task ID:', response.task_id);
-            // Pass task_id to parent for initiating transcription
             setTaskId(response.task_id);
+            
+            // Add this: Pass preview URL to parent
+            if (response.preview_url) {
+              onUploadSuccess(response.preview_url);
+            }
           } else {
             throw new Error('No task ID returned from server');
           }
