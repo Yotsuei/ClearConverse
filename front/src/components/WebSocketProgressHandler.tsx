@@ -37,8 +37,10 @@ const WebSocketProgressHandler: React.FC<WebSocketProgressHandlerProps> = ({
         const data = JSON.parse(event.data);
         console.log('WebSocket data received:', data);
         
-        // Update the progress
-        onProgressUpdate(data.progress, data.message);
+        // Update the progress with the exact message from backend
+        if (data.progress !== undefined && data.message !== undefined) {
+          onProgressUpdate(data.progress, data.message);
+        }
         
         // Check if processing is complete
         if (data.progress >= 100) {
@@ -54,6 +56,7 @@ const WebSocketProgressHandler: React.FC<WebSocketProgressHandlerProps> = ({
     ws.onerror = (event) => {
       console.error('WebSocket error:', event);
       setError('WebSocket connection error');
+      onProgressUpdate(0, 'Connection error. Please try again.');
     };
 
     ws.onclose = () => {
@@ -83,10 +86,12 @@ const WebSocketProgressHandler: React.FC<WebSocketProgressHandlerProps> = ({
         onComplete(result.download_url);
       } else if (result.error) {
         setError(`Task failed: ${result.error}`);
+        onProgressUpdate(100, `Error: ${result.error}`);
       }
     } catch (err) {
       console.error('Error checking task result:', err);
       setError(`Failed to get task result: ${(err as Error).message}`);
+      onProgressUpdate(100, `Failed to get task result: ${(err as Error).message}`);
     }
   };
 

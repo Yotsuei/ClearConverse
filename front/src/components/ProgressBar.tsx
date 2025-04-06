@@ -22,10 +22,12 @@ const ProgressBar: React.FC<ProgressBarProps> = ({ progress, type, onCancel, mes
       if (progress < 90) return "Upload complete...";
       return "Preparing for processing...";
     } else { // processing
-      if (progress < 25) return "Analyzing audio...";
-      if (progress < 50) return "Processing speech...";
-      if (progress < 75) return "Generating transcription...";
-      if (progress < 90) return "Finalizing results...";
+      if (progress < 10) return "Analyzing audio...";
+      if (progress < 30) return "Building speaker profiles...";
+      if (progress < 50) return "Detecting speech segments...";
+      if (progress < 70) return "Processing overlapping speech...";
+      if (progress < 85) return "Generating transcription...";
+      if (progress < 95) return "Finalizing results...";
       return "Transcription complete!";
     }
   };

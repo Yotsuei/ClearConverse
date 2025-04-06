@@ -28,7 +28,7 @@ const App: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingProgress, setProcessingProgress] = useState(0);
   const [taskId, setTaskId] = useState<string | null>(null);
-  const [processingMessage, setProcessingMessage] = useState<string>('Processing...');
+  const [processingMessage, setProcessingMessage] = useState<string>('Preparing to process...');
   
   // Add XHR reference to allow cancellation of in-progress requests
   const xhrRef = useRef<XMLHttpRequest | null>(null);
@@ -70,7 +70,7 @@ const App: React.FC = () => {
   };
 
   const handleProcessingComplete = (downloadUrl: string) => {
-    if (!downloadUrl) {
+    if (downloadUrl) {
       setDownloadUrl(downloadUrl);
     }
   };
@@ -94,7 +94,7 @@ const App: React.FC = () => {
     setIsProcessing(false);
     setProcessingProgress(0);
     setTaskId(null);
-    setProcessingMessage('Processing...');
+    setProcessingMessage('Preparing to process...');
   };
   
   const clearTranscription = () => {
