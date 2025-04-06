@@ -184,22 +184,19 @@ const App: React.FC = () => {
     if (activeModule === 'upload') {
       return (
         <>
-          <div className="bg-gray-750 rounded-lg p-6 mb-6 border border-gray-700">
-            <FileUpload 
-              setTaskId={setTaskId}
-              setIsUploading={setIsUploading}
-              setUploadProgress={setUploadProgress}
-              clearTranscription={clearTranscription}
-              onUploadSuccess={(previewUrl, taskId) => handleUploadSuccess(previewUrl, taskId)}
-            />
-          </div>
-
-          {/* Audio Preview and Transcribe Button Section */}
-          {audioSource.previewUrl && (
-            <div className="mt-6 space-y-4">
+          {!audioSource.previewUrl ? (
+            <div className="bg-gray-750 rounded-lg p-6 mb-6 border border-gray-700">
+              <FileUpload 
+                setTaskId={setTaskId}
+                setIsUploading={setIsUploading}
+                setUploadProgress={setUploadProgress}
+                clearTranscription={clearTranscription}
+                onUploadSuccess={handleUploadSuccess}
+              />
+            </div>
+          ) : (
+            <div className="space-y-4">
               <AudioPlayer audioUrl={audioSource.previewUrl} />
-              
-              {/* Simplified conditional */}
               {taskId && !transcript && (
                 <button
                   onClick={handleTranscribe}
@@ -215,21 +212,19 @@ const App: React.FC = () => {
     } else if (activeModule === 'url') {
       return (
         <>
-          <div className="bg-gray-750 rounded-lg p-6 mb-6 border border-gray-700">
-            <UrlUpload 
-              setTaskId={setTaskId}
-              setIsUploading={setIsUploading}
-              setUploadProgress={setUploadProgress}
-              clearTranscription={clearTranscription}
-              onUploadSuccess={handleUploadSuccess}
-            />
-          </div>
-
-          {/* Audio Preview and Transcribe Button */}
-          {audioSource.previewUrl && (
-            <div className="mt-6 space-y-4">
+          {!audioSource.previewUrl ? (
+            <div className="bg-gray-750 rounded-lg p-6 mb-6 border border-gray-700">
+              <UrlUpload 
+                setTaskId={setTaskId}
+                setIsUploading={setIsUploading}
+                setUploadProgress={setUploadProgress}
+                clearTranscription={clearTranscription}
+                onUploadSuccess={handleUploadSuccess}
+              />
+            </div>
+          ) : (
+            <div className="space-y-4">
               <AudioPlayer audioUrl={audioSource.previewUrl} />
-              
               {taskId && !transcript && (
                 <button
                   onClick={handleTranscribe}
@@ -243,7 +238,6 @@ const App: React.FC = () => {
         </>
       );
     }
-    
     return null;
   };
 
