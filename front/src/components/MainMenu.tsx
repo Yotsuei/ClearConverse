@@ -10,10 +10,10 @@ const MainMenu: React.FC<MainMenuProps> = ({ onSelectModule }) => {
     <div className="w-full max-w-4xl mx-auto">
       <div className="text-center mb-10">
         <h1 className="text-5xl font-extrabold text-gray-100 mb-4">
-          Speech <span className="text-blue-400">Transcription</span> Tool
+          <span className="text-blue-400">Clear</span>Converse
         </h1>
         <p className="text-xl text-gray-400 max-w-3xl mx-auto">
-          Choose one of the options below to convert speech to text using our advanced transcription technology.
+          A speech transcription tool mainly powered by Whisper-RESepFormer solution to offer quality transcription even in overlapping speech scenarios.
         </p>
       </div>
 
@@ -29,15 +29,15 @@ const MainMenu: React.FC<MainMenuProps> = ({ onSelectModule }) => {
             </svg>
           </div>
           <div className="p-6">
-            <h3 className="text-2xl font-bold text-gray-200 mb-2">Upload Audio File</h3>
+            <h3 className="text-2xl font-bold text-gray-200 mb-2">File Upload</h3>
             <p className="text-gray-400 mb-4">
-              Upload an existing audio or video file for transcription.
+              Upload an existing audio file for transcription.
             </p>
             <div className="flex items-center text-sm text-gray-500 mb-3">
               <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
               </svg>
-              Supported formats: WAV, MP3, MP4
+              Supported formats: WAV, MP3
             </div>
             <div className="flex items-center text-sm text-gray-500 mb-5">
               <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -62,15 +62,15 @@ const MainMenu: React.FC<MainMenuProps> = ({ onSelectModule }) => {
             </svg>
           </div>
           <div className="p-6">
-            <h3 className="text-2xl font-bold text-gray-200 mb-2">Upload from URL</h3>
+            <h3 className="text-2xl font-bold text-gray-200 mb-2">Google Drive URL Upload</h3>
             <p className="text-gray-400 mb-4">
-              Provide a link to an audio or video file hosted online.
+              Provide a link to an audio file hosted in Google Drive.
             </p>
             <div className="flex items-center text-sm text-gray-500 mb-3">
               <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path>
               </svg>
-              Support for direct audio links and Google Drive
+              Support for audio links from Google Drive
             </div>
             <div className="flex items-center text-sm text-gray-500 mb-5">
               <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -86,7 +86,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ onSelectModule }) => {
       </div>
 
       <div className="mt-12 text-center text-gray-500">
-        <p>Both options provide high-quality transcription with speaker detection.</p>
+        <p>Both options provide transcription with proper speaker-speech format.</p>
       </div>
     </div>
   );

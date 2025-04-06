@@ -257,7 +257,7 @@ const App: React.FC = () => {
         <div className="w-full max-w-3xl bg-gray-800 shadow-xl rounded-xl p-8 border border-gray-700">
           <div className="flex justify-between items-center mb-6">
             <h1 className="text-3xl font-extrabold tracking-tight text-gray-100">
-              {activeModule === 'upload' ? 'File Upload Transcription' : 'URL Upload Transcription'}
+              {activeModule === 'upload' ? 'File Upload' : 'Google Drive URL'}
             </h1>
             <button 
               onClick={goToMainMenu}

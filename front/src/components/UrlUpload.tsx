@@ -267,7 +267,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
               : 'bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg'}`
           }
         >
-          Upload from URL
+          Google Drive URL Upload
         </button>
       ) : (
         <button

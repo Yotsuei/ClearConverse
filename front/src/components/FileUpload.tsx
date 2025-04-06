@@ -204,7 +204,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
 
   return (
     <div className="flex flex-col items-center">
-      <h2 className="text-xl font-bold text-gray-200 mb-4">Upload Audio File</h2>
+      <h2 className="text-xl font-bold text-gray-200 mb-4">File Upload</h2>
       <p className="text-gray-400 mb-6 text-center">
         Upload your audio or video file for transcription. WAV and MP3 formats are recommended for best results.
       </p>
@@ -246,32 +246,6 @@ const FileUpload: React.FC<FileUploadProps> = ({
       {fileError && (
         <div className="w-full bg-red-900/50 border border-red-700 rounded-lg p-3 mb-4 text-red-200 text-sm">
           <p>{fileError}</p>
-        </div>
-      )}
-      
-      {file && (
-        <div className="w-full bg-gray-700 rounded-lg p-3 mb-4 flex items-center">
-          <div className="bg-blue-900 rounded-lg p-2 mr-3">
-            <svg className="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path>
-            </svg>
-          </div>
-          <div className="flex-grow truncate">
-            <p className="text-sm font-medium truncate text-gray-200">{file.name}</p>
-            <p className="text-xs text-gray-400">{(file.size / (1024 * 1024)).toFixed(2)} MB</p>
-          </div>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setFile(null);
-              clearTranscription();
-            }}
-            className="ml-2 text-gray-400 hover:text-red-400"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
-            </svg>
-          </button>
         </div>
       )}
       
