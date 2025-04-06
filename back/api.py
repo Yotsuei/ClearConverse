@@ -281,28 +281,33 @@ class EnhancedAudioProcessor:
 
     def _initialize_models(self):
         logging.info(f"Initializing models on {self.device}...")
-        cache_dir = "models"  
+        cache_dir = "models" 
+
         self.separator = SepformerSeparation.from_hparams(
             source="speechbrain/resepformer-wsj02mix",
             savedir=os.path.join(cache_dir, "resepformer"),
             run_opts={"device": self.device}
         )
         self.whisper_model = whisper.load_model(self.config.whisper_model_size, download_root=os.path.join(cache_dir, "whisper")).to(self.device)
+
         self.diarization = Pipeline.from_pretrained(
             "pyannote/speaker-diarization-3.1",
             use_auth_token=self.config.auth_token,
             cache_dir=os.path.join(cache_dir, "speaker-diarization")
         ).to(self.device)
+
         self.vad_pipeline = Pipeline.from_pretrained(
             "pyannote/voice-activity-detection",
             use_auth_token=self.config.auth_token,
             cache_dir=os.path.join(cache_dir, "vad")
         ).to(self.device)
+
         self.embedding_model = Inference(
             "pyannote/embedding",
             window="whole",
             use_auth_token=self.config.auth_token,
         ).to(self.device)
+        
         logging.info("Models initialized successfully!")
 
     def load_audio(self, file_path: str) -> Tuple[torch.Tensor, int]:
@@ -860,7 +865,10 @@ async def upload_url(url: str = Form(...)):
         logging.error(f"Error downloading file from URL {url}: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Failed to download file: {str(e)}")
     uploaded_files[task_id] = str(file_path)
-    return JSONResponse(content={"task_id": task_id, "preview_url": f"/preview/{filename}"})
+    return JSONResponse(content={
+            "task_id": task_id,
+            "preview_url": f"/preview/{filename}"  # Make sure this matches the actual endpoint
+        })
 
 # -----------------------------------------------------------------------------
 # Endpoint: Transcription (Using Task ID)

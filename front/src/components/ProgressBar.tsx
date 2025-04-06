@@ -5,11 +5,16 @@ interface ProgressBarProps {
   progress: number;
   type: 'upload' | 'processing';
   onCancel?: () => void;
+  message?: string; // Added message prop for more detailed status
 }
 
-const ProgressBar: React.FC<ProgressBarProps> = ({ progress, type, onCancel }) => {
+const ProgressBar: React.FC<ProgressBarProps> = ({ progress, type, onCancel, message }) => {
   // Determine the stage based on progress percentage and type
   const getStage = () => {
+    if (message) {
+      return message; // Use the provided message if available
+    }
+    
     if (type === 'upload') {
       if (progress < 25) return "Starting upload...";
       if (progress < 50) return "Uploading file...";
