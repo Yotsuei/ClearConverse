@@ -2,19 +2,20 @@
 import React, { useState } from 'react';
 
 interface UrlUploadProps {
-  onFileSelected: (file: File) => void;
   setTaskId: (taskId: string) => void;
   setIsUploading: (isUploading: boolean) => void;
   setUploadProgress: (progress: number) => void;
   clearTranscription: () => void;
+  onUploadSuccess: (previewUrl: string, taskId: string) => void; // Add this prop
 }
 
+
 const UrlUpload: React.FC<UrlUploadProps> = ({ 
-  onFileSelected, 
   setTaskId,
   setIsUploading, 
   setUploadProgress,
-  clearTranscription
+  clearTranscription,
+  onUploadSuccess // Add this prop
 }) => {
   const [url, setUrl] = useState<string>('');
   const [isValidUrl, setIsValidUrl] = useState<boolean>(false);
@@ -75,8 +76,6 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
   };
 
   const handleUpload = async () => {
-    // Clear any previous transcription
-    clearTranscription();
     
     if (!url || !isValidUrl) {
       setUrlError('Please enter a valid audio/video URL');
@@ -93,7 +92,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
     try {
       // Implement XMLHttpRequest for progress tracking
       const xhr = new XMLHttpRequest();
-      setUploadXhr(xhr); // Store XHR reference for cancel functionality
+      setUploadXhr(xhr);
       
       xhr.open('POST', 'http://localhost:8000/upload-url');
       
@@ -117,31 +116,15 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
           setIsUploading(false);
           setUploadXhr(null);
           
-          // Parse response
           const response = JSON.parse(xhr.responseText);
           
           if (response.task_id) {
-            console.log('URL uploaded. Task ID:', response.task_id);
+            console.log('URL uploaded. Task ID:', response.task_id);  
             
-            // Set the task ID for initiating transcription
-            setTaskId(response.task_id);
-            
-            // If there's a preview URL, create a dummy File object
-            // for audio preview purposes
+            // Modified: Use the preview URL from backend response
             if (response.preview_url) {
-              // Create a dummy File for preview
-              const dummyFile = new File(
-                [new Blob()], 
-                "audio_from_url.mp3", 
-                { type: "audio/mpeg" }
-              );
-              
-              // Set the file with preview URL
-              onFileSelected(dummyFile);
-              
-              // Optionally, you could fetch the audio from the preview URL
-              // to create a more accurate File object
-            }
+              onUploadSuccess(response.preview_url, response.task_id); // This should handle both
+            }  
           } else {
             throw new Error('No task ID returned from server');
           }

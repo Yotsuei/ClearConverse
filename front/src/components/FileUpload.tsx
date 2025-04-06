@@ -156,14 +156,11 @@ const FileUpload: React.FC<FileUploadProps> = ({
           // Parse response to get task_id
           const response = JSON.parse(xhr.responseText);
           
-          if (response.task_id) {
+          if (response.task_id && response.preview_url) {
             console.log('File uploaded. Task ID:', response.task_id);
             setTaskId(response.task_id);
-            
-            // Add this: Pass preview URL to parent
-            if (response.preview_url) {
-              onUploadSuccess(response.preview_url);
-            }
+            onUploadSuccess(response.preview_url, response.task_id); // Pass both values
+    
           } else {
             throw new Error('No task ID returned from server');
           }

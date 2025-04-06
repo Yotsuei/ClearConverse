@@ -866,7 +866,10 @@ async def upload_url(url: str = Form(...)):
         logging.error(f"Error downloading file from URL {url}: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Failed to download file: {str(e)}")
     uploaded_files[task_id] = str(file_path)
-    return JSONResponse(content={"task_id": task_id, "preview_url": f"/preview/{filename}"})
+    return JSONResponse(content={
+            "task_id": task_id,
+            "preview_url": f"/preview/{filename}"  # Make sure this matches the actual endpoint
+        })
 
 # -----------------------------------------------------------------------------
 # Endpoint: Transcription (Using Task ID)

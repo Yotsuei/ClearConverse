@@ -79,6 +79,7 @@ const App: React.FC = () => {
   const handleUploadSuccess = (previewUrl: string, newTaskId: string) => {
     setAudioSource({ previewUrl: `http://localhost:8000${previewUrl}` });
     setTaskId(newTaskId);
+    setIsUploading(false);
   };
 
   const resetState = () => {
@@ -189,7 +190,7 @@ const App: React.FC = () => {
               setIsUploading={setIsUploading}
               setUploadProgress={setUploadProgress}
               clearTranscription={clearTranscription}
-              onUploadSuccess={handleUploadSuccess}
+              onUploadSuccess={(previewUrl, taskId) => handleUploadSuccess(previewUrl, taskId)}
             />
           </div>
 
@@ -198,7 +199,8 @@ const App: React.FC = () => {
             <div className="mt-6 space-y-4">
               <AudioPlayer audioUrl={audioSource.previewUrl} />
               
-              {taskId && !transcript && !isUploading && !isProcessing && (
+              {/* Simplified conditional */}
+              {taskId && !transcript && (
                 <button
                   onClick={handleTranscribe}
                   className="w-full py-3 px-5 text-white font-bold rounded-lg transition-all duration-300 bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg"
@@ -209,7 +211,7 @@ const App: React.FC = () => {
             </div>
           )}
         </>
-      );  
+      );
     } else if (activeModule === 'url') {
       return (
         <>
@@ -219,27 +221,23 @@ const App: React.FC = () => {
               setIsUploading={setIsUploading}
               setUploadProgress={setUploadProgress}
               clearTranscription={clearTranscription}
-              onUploadSuccess={handleUploadSuccess}  // Added
+              onUploadSuccess={handleUploadSuccess}
             />
           </div>
 
-          {audioSource.previewUrl && !isUploading && !isProcessing && (
-            <div className="mt-6">
-              <AudioPlayer 
-                audioUrl={audioSource.previewUrl} 
-                onTranscribe={handleTranscribe}
-              />
-            </div>
-          )}
-
-          {taskId && !transcript && !isUploading && !isProcessing && (
-            <div className="mt-6">
-              <button
-                onClick={handleTranscribe}
-                className="w-full py-3 px-5 mt-2 text-white font-bold rounded-lg transition-all duration-300 bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg"
-              >
-                Start Transcription
-              </button>
+          {/* Audio Preview and Transcribe Button */}
+          {audioSource.previewUrl && (
+            <div className="mt-6 space-y-4">
+              <AudioPlayer audioUrl={audioSource.previewUrl} />
+              
+              {taskId && !transcript && (
+                <button
+                  onClick={handleTranscribe}
+                  className="w-full py-3 px-5 text-white font-bold rounded-lg transition-all duration-300 bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg"
+                >
+                  Start Transcription
+                </button>
+              )}
             </div>
           )}
         </>
