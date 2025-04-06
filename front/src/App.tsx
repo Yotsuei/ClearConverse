@@ -1,5 +1,5 @@
 // App.tsx
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import FileUpload from './components/FileUpload';
 import AudioRecorder from './components/AudioRecorder';
 import AudioPlayer from './components/AudioPlayer';
@@ -8,7 +8,7 @@ import MainMenu from './components/MainMenu';
 import ProgressBar from './components/ProgressBar';
 import ResetButton from './components/ResetButton';
 import ClearButton from './components/ClearButton';
-import FloatingActionButton from './components/FloatingActionButton';
+import WebSocketProgressHandler from './components/WebSocketProgressHandler';
 import './index.css';
 
 type AudioSource = {
@@ -28,22 +28,95 @@ const App: React.FC = () => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingProgress, setProcessingProgress] = useState(0);
+  const [taskId, setTaskId] = useState<string | null>(null);
+  const [processingMessage, setProcessingMessage] = useState<string>('Processing...');
   
   // Add XHR reference to allow cancellation of in-progress requests
   const xhrRef = useRef<XMLHttpRequest | null>(null);
-  // Add interval reference to clear processing simulation
-  const processingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Track object URLs for cleanup
+  const objectUrlsRef = useRef<string[]>([]);
 
-  const handleUploadResponse = (transcript: string, downloadUrl: string) => {
-    setTranscript(transcript);
-    setDownloadUrl(downloadUrl);
-    setIsProcessing(false);
-    setProcessingProgress(100);
+  // Effect to fetch transcription once processing is complete
+  useEffect(() => {
+    if (processingProgress === 100 && taskId) {
+      fetchTranscription(taskId);
+    }
+  }, [processingProgress, taskId]);
+
+  // Clean up object URLs when component unmounts
+  useEffect(() => {
+    return () => {
+      // Cleanup all created object URLs on unmount
+      objectUrlsRef.current.forEach(url => {
+        URL.revokeObjectURL(url);
+      });
+    };
+  }, []);
+
+  // Create object URL with automatic tracking for cleanup
+  const createObjectURL = (blob: Blob): string => {
+    const url = URL.createObjectURL(blob);
+    objectUrlsRef.current.push(url);
+    return url;
+  };
+
+  // Revoke a specific object URL
+  const revokeObjectURL = (url: string) => {
+    URL.revokeObjectURL(url);
+    objectUrlsRef.current = objectUrlsRef.current.filter(u => u !== url);
+  };
+
+  const fetchTranscription = async (taskId: string) => {
+    try {
+      const response = await fetch(`http://localhost:8000/transcription/${taskId}`);
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch transcription: ${response.status} ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.transcription) {
+        setTranscript(data.transcription);
+        // Set download URL consistently
+        setDownloadUrl(`/download/${taskId}/transcript.txt`);
+      } else {
+        throw new Error('No transcription data returned');
+      }
+    } catch (error) {
+      console.error('Error fetching transcription:', error);
+      alert(`Failed to get transcription: ${(error as Error).message}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleProgressUpdate = (progress: number, message: string) => {
+    setProcessingProgress(progress);
+    setProcessingMessage(message);
+  };
+
+  const handleProcessingComplete = (downloadUrl: string) => {
+    // Only update download URL if it's not already set
+    if (!downloadUrl) {
+      setDownloadUrl(downloadUrl);
+    }
   };
 
   const handleFileSelected = (file: File) => {
-    const url = URL.createObjectURL(file);
+    // Clear previous object URL if exists
+    if (audioSource.url) {
+      revokeObjectURL(audioSource.url);
+    }
+    
+    // Create and track new object URL
+    const url = createObjectURL(file);
     setAudioSource({ file, url });
+    
+    // Clear transcript when selecting a new file
+    setTranscript(null);
+    setDownloadUrl(null);
   };
 
   const handleRecordingComplete = (blob: Blob) => {
@@ -63,14 +136,29 @@ const App: React.FC = () => {
     
     // Create file with the correct MIME type - this is critical!
     const file = new File([blob], `recording${fileExtension}`, { type: blob.type });
-    const url = URL.createObjectURL(blob);
     
+    // Clear previous object URL if exists
+    if (audioSource.url) {
+      revokeObjectURL(audioSource.url);
+    }
+    
+    // Create and track new object URL
+    const url = createObjectURL(blob);
     setAudioSource({ file, url });
+    
+    // Clear transcript when creating a new recording
+    setTranscript(null);
+    setDownloadUrl(null);
   };
 
   const resetState = () => {
     // Cancel any ongoing requests first
     cancelTranscription();
+    
+    // Clear object URL
+    if (audioSource.url) {
+      revokeObjectURL(audioSource.url);
+    }
     
     // Reset all states
     setAudioSource({ file: null, url: null });
@@ -80,6 +168,8 @@ const App: React.FC = () => {
     setUploadProgress(0);
     setIsProcessing(false);
     setProcessingProgress(0);
+    setTaskId(null);
+    setProcessingMessage('Processing...');
     
     // Also clear the file input if it exists
     const fileInput = document.getElementById('fileInput') as HTMLInputElement;
@@ -89,12 +179,12 @@ const App: React.FC = () => {
   };
   
   const clearTranscription = () => {
-    // Clear both the transcription result and the audio file
-    setAudioSource({ file: null, url: null });
+    // Clear only the transcription result
     setTranscript(null);
     setDownloadUrl(null);
     setIsProcessing(false);
     setProcessingProgress(0);
+    // Keep taskId in case we want to restart transcription with the same file
   };
   
   const clearAll = () => {
@@ -113,29 +203,6 @@ const App: React.FC = () => {
     setShowMainMenu(true);
   };
 
-  // Simulate processing progress
-  const startProcessingSimulation = () => {
-    setIsProcessing(true);
-    let progress = 0;
-    
-    // Clear any existing interval
-    if (processingIntervalRef.current) {
-      clearInterval(processingIntervalRef.current);
-    }
-    
-    // Start new interval
-    const interval = setInterval(() => {
-      progress += 5;
-      setProcessingProgress(Math.min(progress, 95)); // Max at 95% to indicate waiting for server
-      if (progress >= 95) {
-        clearInterval(interval);
-        processingIntervalRef.current = null;
-      }
-    }, 500);
-    
-    processingIntervalRef.current = interval;
-  };
-
   // Cancel transcription function
   const cancelTranscription = () => {
     // Cancel any ongoing XHR request
@@ -144,81 +211,128 @@ const App: React.FC = () => {
       xhrRef.current = null;
     }
     
-    // Clear processing simulation
-    if (processingIntervalRef.current) {
-      clearInterval(processingIntervalRef.current);
-      processingIntervalRef.current = null;
-    }
-    
     // Reset progress states
     setIsUploading(false);
     setUploadProgress(0);
     setIsProcessing(false);
     setProcessingProgress(0);
+
+    // If we have a task ID, try to cancel it on the server
+    if (taskId) {
+      fetch(`http://localhost:8000/cleanup/${taskId}`, { method: 'DELETE' })
+        .then(response => {
+          if (!response.ok) {
+            console.error('Failed to cleanup task on server');
+          }
+        })
+        .catch(err => {
+          console.error('Error cleaning up task:', err);
+        });
+    }
+  };
+
+  // Start transcription process with the uploaded file
+  const startTranscription = async () => {
+    if (!taskId) {
+      alert('No task ID available. Please upload a file first.');
+      return;
+    }
+    
+    setIsProcessing(true);
+    setProcessingProgress(0);
+    setProcessingMessage('Starting transcription...');
+
+    try {
+      const response = await fetch(`http://localhost:8000/transcribe/${taskId}`, {
+        method: 'POST'
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.status} ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      console.log('Transcription started:', data);
+    } catch (error) {
+      console.error('Error starting transcription:', error);
+      alert(`Failed to start transcription: ${(error as Error).message}`);
+      setIsProcessing(false);
+    }
   };
 
   // Handle transcription from either audio player or recorder
   const handleTranscribe = () => {
     if (!audioSource.file) return;
     
-    // Log the file details for debugging
-    console.log(`Sending file: ${audioSource.file.name}, type: ${audioSource.file.type}, size: ${audioSource.file.size} bytes`);
-    
-    setIsUploading(true);
-    setUploadProgress(0);
-    const formData = new FormData();
-    formData.append('file', audioSource.file);
-
-    try {
-      // Implement XMLHttpRequest for progress tracking
-      const xhr = new XMLHttpRequest();
-      // Store XHR reference for cancellation
-      xhrRef.current = xhr;
+    if (activeModule === 'upload') {
+      // For upload module, the file should already be uploaded
+      // Just start the transcription process
+      if (taskId) {
+        startTranscription();
+      } else {
+        alert('Please upload a file first.');
+      }
+    } else if (activeModule === 'record') {
+      // For recording module, we need to upload the file first, then start transcription
+      setIsUploading(true);
+      setUploadProgress(0);
       
-      xhr.open('POST', 'http://localhost:8000/transcribe');
-      
-      xhr.upload.addEventListener('progress', (event) => {
-        if (event.lengthComputable) {
-          const progress = Math.round((event.loaded / event.total) * 100);
-          setUploadProgress(progress);
-        }
-      });
+      const formData = new FormData();
+      formData.append('file', audioSource.file);
 
-      xhr.onload = function() {
-        xhrRef.current = null;
-        if (xhr.status === 200) {
+      try {
+        // Implement XMLHttpRequest for progress tracking
+        const xhr = new XMLHttpRequest();
+        xhrRef.current = xhr;
+        
+        xhr.open('POST', 'http://localhost:8000/upload-file');
+        
+        xhr.upload.addEventListener('progress', (event) => {
+          if (event.lengthComputable) {
+            const progress = Math.round((event.loaded / event.total) * 100);
+            setUploadProgress(progress);
+          }
+        });
+
+        xhr.onload = function() {
+          xhrRef.current = null;
+          if (xhr.status === 200) {
+            setIsUploading(false);
+            
+            // Parse response
+            const response = JSON.parse(xhr.responseText);
+            
+            // Set task ID and start transcription
+            if (response.task_id) {
+              setTaskId(response.task_id);
+              startTranscription();
+            } else {
+              throw new Error('No task ID returned from server');
+            }
+          } else {
+            throw new Error(`Server error: ${xhr.status} ${xhr.statusText}`);
+          }
+        };
+
+        xhr.onerror = function() {
+          xhrRef.current = null;
           setIsUploading(false);
-          startProcessingSimulation();
-          
-          // Parse response
-          const response = JSON.parse(xhr.responseText);
-          handleUploadResponse(response.transcript, response.download_url);
-        } else {
-          console.error(`Server error: ${xhr.status} ${xhr.statusText}`);
-          console.error(`Response: ${xhr.responseText}`);
+          console.error('Network error occurred');
+          alert('Network error occurred. Please check your connection and try again.');
+        };
+
+        xhr.onabort = function() {
+          console.log('Upload request aborted');
           setIsUploading(false);
-          alert(`Error: ${xhr.statusText || 'Server error'}\n${xhr.responseText || ''}`);
-        }
-      };
+        };
 
-      xhr.onerror = function() {
+        xhr.send(formData);
+      } catch (error) {
+        console.error('Upload failed:', error);
+        alert(`There was an error uploading your file: ${(error as Error).message}`);
+        setIsUploading(false);
         xhrRef.current = null;
-        setIsUploading(false);
-        console.error('Network error occurred');
-        alert('Network error occurred. Please check your connection and try again.');
-      };
-
-      xhr.onabort = function() {
-        console.log('Transcription request aborted');
-        setIsUploading(false);
-      };
-
-      xhr.send(formData);
-    } catch (error) {
-      console.error('Upload failed:', error);
-      alert('There was an error uploading your file.');
-      setIsUploading(false);
-      xhrRef.current = null;
+      }
     }
   };
 
@@ -230,11 +344,9 @@ const App: React.FC = () => {
           <div className="bg-gray-750 rounded-lg p-6 mb-6 border border-gray-700">
             <FileUpload 
               onFileSelected={handleFileSelected}
-              onUploadResponse={handleUploadResponse}
+              setTaskId={setTaskId}
               setIsUploading={setIsUploading}
               setUploadProgress={setUploadProgress}
-              setIsProcessing={setIsProcessing}
-              startProcessing={startProcessingSimulation}
               clearTranscription={clearTranscription}
             />
           </div>
@@ -246,6 +358,18 @@ const App: React.FC = () => {
                 audioUrl={audioSource.url} 
                 onTranscribe={handleTranscribe}
               />
+            </div>
+          )}
+
+          {/* Transcribe button - only show when we have a file and task ID but no transcription yet */}
+          {audioSource.file && taskId && !transcript && !isUploading && !isProcessing && (
+            <div className="mt-6">
+              <button
+                onClick={handleTranscribe}
+                className="w-full py-3 px-5 mt-2 text-white font-bold rounded-lg transition-all duration-300 bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg"
+              >
+                Start Transcription
+              </button>
             </div>
           )}
         </>
@@ -265,7 +389,7 @@ const App: React.FC = () => {
             <div className="mt-6">
               <AudioPlayer 
                 audioUrl={audioSource.url} 
-                onTranscribe={handleTranscribe} // Added transcribe button to audio player for recording too
+                onTranscribe={handleTranscribe}
               />
             </div>
           )}
@@ -276,11 +400,17 @@ const App: React.FC = () => {
     return null;
   };
 
-  // Determine if we should show the "Clear" button
-  const shouldShowClearButton = audioSource.file && transcript;
-
   return (
     <div className="min-h-screen w-full bg-gray-900 flex flex-col items-center justify-center p-6 text-gray-200">
+      {/* WebSocket handler for real-time progress updates */}
+      {taskId && isProcessing && (
+        <WebSocketProgressHandler 
+          taskId={taskId} 
+          onProgressUpdate={handleProgressUpdate}
+          onComplete={handleProcessingComplete}
+        />
+      )}
+    
       {showMainMenu ? (
         <MainMenu onSelectModule={handleModuleSelect} />
       ) : (
@@ -300,7 +430,7 @@ const App: React.FC = () => {
             </button>
           </div>
           
-          {/* Module Content - No more tabs */}
+          {/* Module Content */}
           {renderModuleContent()}
 
           {/* Progress Bars with Cancel Button */}
@@ -318,7 +448,13 @@ const App: React.FC = () => {
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-lg font-semibold text-gray-200">Processing Progress</h3>
               </div>
-              <ProgressBar progress={processingProgress} type="processing" onCancel={cancelTranscription} />
+              <ProgressBar 
+                progress={processingProgress} 
+                type="processing" 
+                onCancel={cancelTranscription}
+                message={processingMessage}
+              />
+              <p className="text-sm text-gray-400 mt-2">{processingMessage}</p>
             </div>
           )}
 
@@ -343,23 +479,8 @@ const App: React.FC = () => {
               transcript={transcript} 
               downloadUrl={downloadUrl}
               onClear={clearTranscription}
-              onReset={clearAll} // Changed to clearAll to reset everything
+              onReset={clearAll}
             />
-          )}
-          
-          {/* Clear Transcription Button (when both audio and transcript exist) */}
-          {shouldShowClearButton && !isUploading && !isProcessing && (
-            <div className="mt-4 flex justify-end">
-              <button
-                onClick={clearAll} // Changed to clearAll to reset everything including audio
-                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium rounded-lg transition-colors flex items-center gap-2"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                </svg>
-                Clear Everything
-              </button>
-            </div>
           )}
         </div>
       )}
@@ -372,17 +493,6 @@ const App: React.FC = () => {
           isProcessing={isUploading || isProcessing}
           hasTranscription={Boolean(transcript)}
         />
-      )}
-      
-      {/* Adding ClearButton as a separate floating button on the left side */}
-      {!showMainMenu && audioSource.file && transcript && !isUploading && !isProcessing && (
-        <div className="fixed bottom-6 left-6 z-10">
-          <ClearButton 
-            onClear={clearAll} // Changed to clearAll to reset everything including audio
-            isProcessing={false}
-            includeAudio={true} // Explicitly setting to true to indicate clearing everything
-          />
-        </div>
       )}
       
       <footer className="mt-8 text-center text-gray-500 text-sm">

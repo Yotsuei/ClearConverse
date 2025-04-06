@@ -3,21 +3,17 @@ import React, { useState } from 'react';
 
 interface FileUploadProps {
   onFileSelected: (file: File) => void;
-  onUploadResponse: (transcript: string, downloadUrl: string) => void;
+  setTaskId: (taskId: string) => void;
   setIsUploading: (isUploading: boolean) => void;
   setUploadProgress: (progress: number) => void;
-  setIsProcessing: (isProcessing: boolean) => void;
-  startProcessing: () => void;
   clearTranscription: () => void;
 }
 
 const FileUpload: React.FC<FileUploadProps> = ({ 
   onFileSelected, 
-  onUploadResponse, 
+  setTaskId,
   setIsUploading, 
   setUploadProgress,
-  setIsProcessing,
-  startProcessing,
   clearTranscription
 }) => {
   const [file, setFile] = useState<File | null>(null);
@@ -36,14 +32,17 @@ const FileUpload: React.FC<FileUploadProps> = ({
     ];
     
     // Secondary formats (may require conversion)
-    const secondaryExtensions = ['.mp4', '.webm', '.ogg'];
+    const secondaryExtensions = ['.mp4', '.webm', '.ogg', '.flac', '.m4a', '.aac'];
     const secondaryMimeTypes = [
       'video/mp4', 
       'audio/mp4',
       'audio/webm',
       'video/webm',
       'audio/ogg',
-      'application/ogg'
+      'application/ogg',
+      'audio/flac',
+      'audio/m4a',
+      'audio/aac'
     ];
     
     // Combine all valid formats
@@ -145,7 +144,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
       const xhr = new XMLHttpRequest();
       setUploadXhr(xhr); // Store XHR reference for cancel functionality
       
-      xhr.open('POST', 'http://localhost:8000/transcribe');
+      xhr.open('POST', 'http://localhost:8000/upload-file');
       
       xhr.upload.addEventListener('progress', (event) => {
         if (event.lengthComputable) {
@@ -158,13 +157,19 @@ const FileUpload: React.FC<FileUploadProps> = ({
         if (xhr.status === 200) {
           setIsUploading(false);
           setUploadXhr(null);
-          startProcessing();
           
-          // Parse response
+          // Parse response to get task_id
           const response = JSON.parse(xhr.responseText);
-          onUploadResponse(response.transcript, response.download_url);
+          
+          if (response.task_id) {
+            console.log('File uploaded. Task ID:', response.task_id);
+            // Pass task_id to parent for initiating transcription
+            setTaskId(response.task_id);
+          } else {
+            throw new Error('No task ID returned from server');
+          }
         } else {
-          throw new Error(`Error: ${xhr.statusText}`);
+          throw new Error(`Error: ${xhr.statusText || 'Server returned an error'}`);
         }
       };
 
@@ -180,7 +185,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
       xhr.send(formData);
     } catch (error) {
       console.error('Upload failed:', error);
-      alert('There was an error uploading your file.');
+      alert(`There was an error uploading your file: ${(error as Error).message}`);
       setIsUploading(false);
       setUploadXhr(null);
     }
@@ -220,7 +225,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
         <input
           id="fileInput"
           type="file"
-          accept=".wav,.mp4,.mp3,.webm,.ogg"
+          accept=".wav,.mp4,.mp3,.webm,.ogg,.flac,.m4a,.aac"
           onChange={handleFileChange}
           className="hidden"
         />
@@ -284,7 +289,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
               : 'bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg'}`
           }
         >
-          Upload & Transcribe
+          Upload Audio
         </button>
       ) : (
         <button
@@ -304,14 +309,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
           </svg>
           Supported File Formats
         </h3>
-        <ul className="list-disc list-inside text-gray-300 space-y-1">
-          <li><span className="font-medium text-green-400">.wav</span> - Waveform Audio Format (recommended)</li>
-          <li><span className="font-medium text-green-400">.mp3</span> - MP3 Audio Format (recommended)</li>
-          <li><span className="font-medium text-gray-400">.mp4</span> - MPEG-4 Video (audio will be extracted)</li>
-          <li><span className="font-medium text-gray-400">.webm</span> - WebM Audio/Video (may require conversion)</li>
-          <li><span className="font-medium text-gray-400">.ogg</span> - Ogg Vorbis Audio (may require conversion)</li>
-        </ul>
-        <p className="mt-2 text-gray-400">For best results, use WAV or MP3 files with clear audio and minimal background noise. Other formats may cause processing errors.</p>
+        <p className="mt-2 text-gray-400">For best results, use WAV or MP3 files with clear audio and minimal background noise.</p>
       </div>
     </div>
   );
