@@ -19,7 +19,8 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
   const [showConfirmDialog, setShowConfirmDialog] = useState<string | null>(null);
 
   // Base API URL - would come from environment variables in production
-  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+  // const API_BASE_URL = process.env.REACT_APP_API_URL;
+  const API_BASE_URL =  'http://localhost:8000';
 
   // Parse the transcript to highlight speaker segments
   const formatTranscript = (text: string) => {
@@ -32,7 +33,7 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
       
       return parts.map((part, index) => {
         if (part.match(/\[SPEAKER_[A-Z]\]/)) {
-          const speaker = part.replace(/[\[\]]/g, '');
+          const speaker = part.replace(/[\\[\]]/g, '');
           // Assign different colors based on speaker
           const color = speaker === 'SPEAKER_A' ? 'text-blue-400' : 
                        speaker === 'SPEAKER_B' ? 'text-gray-300' : 
