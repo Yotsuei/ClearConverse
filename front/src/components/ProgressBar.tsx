@@ -19,9 +19,19 @@ const ProgressBar: React.FC<ProgressBarProps> = ({ progress, type, onCancel, mes
     }
     
     if (type === 'upload') {
-      return "Uploading file...";
+      if (progress < 25) return "Starting upload...";
+      if (progress < 50) return "Uploading file...";
+      if (progress < 75) return "Verifying upload...";
+      if (progress < 90) return "Upload complete...";
+      return "Preparing for processing...";
     } else { // processing
-      return "Processing in progress...";
+      if (progress < 10) return "Initializing transcription...";
+      if (progress < 30) return "Building speaker profiles...";
+      if (progress < 50) return "Detecting speech segments...";
+      if (progress < 70) return "Processing overlapping speech...";
+      if (progress < 85) return "Generating transcription...";
+      if (progress < 95) return "Finalizing results...";
+      return "Transcription complete!";
     }
   };
 

@@ -8,7 +8,7 @@ import MainMenu from './components/MainMenu';
 import ProgressBar from './components/ProgressBar';
 import ResetButton from './components/ResetButton';
 import ClearButton from './components/ClearButton';
-//import WebSocketProgressHandler from './components/WebSocketProgressHandler';
+import WebSocketProgressHandler from './components/WebSocketProgressHandler';
 import './index.css';
 
 type AudioSource = {
@@ -29,7 +29,8 @@ const App: React.FC = () => {
   const [processingProgress, setProcessingProgress] = useState(0);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [processingMessage, setProcessingMessage] = useState<string>('Preparing to process...');
-  // WebSocket state variables removed
+  const [isWsConnected, setIsWsConnected] = useState(false);
+  const [connectionAttempts, setConnectionAttempts] = useState(0);
   
   // Add XHR reference to allow cancellation of in-progress requests
   const xhrRef = useRef<XMLHttpRequest | null>(null);
@@ -41,51 +42,38 @@ const App: React.FC = () => {
     }
   }, [processingProgress, taskId]);
 
-  // Effect to poll for progress when processing is active
+  // Effect to handle websocket connection failures
   useEffect(() => {
-    if (isProcessing && taskId) {
-      // Start the polling once when processing begins
-      startPolling();
-      
-      // No need to have an interval that calls startPolling repeatedly
-      // startPolling itself sets up its own interval
-    }
-  }, [isProcessing, taskId]);
-
-const startPolling = () => {
-  if (!taskId) return;
-  
-  const pollingInterval = setInterval(async () => {
-    try {
-      // Try to fetch the transcription directly
-      const response = await fetch(`http://localhost:8000/transcription/${taskId}`);
-      
-      if (response.ok) {
-        // Transcription is ready
-        clearInterval(pollingInterval);
-        
-        const data = await response.json();
-        if (data.transcription) {
-          setProcessingProgress(100);
-          setProcessingMessage('Processing complete!');
-          setTranscript(data.transcription);
-          setDownloadUrl(`/download/${taskId}/transcript.txt`);
-          setIsProcessing(false);
+    if (connectionAttempts > 0 && !isWsConnected && isProcessing) {
+      // Poll for progress as a fallback if WebSocket fails
+      const pollInterval = setInterval(() => {
+        if (taskId) {
+          pollTaskProgress(taskId);
         }
-      } else {
-        // Still processing, update progress bar
-        setProcessingProgress(prev => {
-          // Increment progress but cap at 95% until complete
-          const increment = Math.random() * 3;
-          return prev + increment > 95 ? 95 : prev + increment;
-        });
+      }, 2000);
+      
+      return () => clearInterval(pollInterval);
+    }
+  }, [connectionAttempts, isWsConnected, isProcessing, taskId]);
+
+  const pollTaskProgress = async (taskId: string) => {
+    try {
+      const response = await fetch(`http://localhost:8000/task/${taskId}/result`);
+      if (response.ok) {
+        const data = await response.json();
+        
+        // If we have a download URL, processing is complete
+        if (data.download_url) {
+          setProcessingProgress(100);
+          setProcessingMessage("Processing complete!");
+          setDownloadUrl(data.download_url);
+          fetchTranscription(taskId);
+        }
       }
     } catch (error) {
-      console.error('Error checking transcription status:', error);
-      // Don't show error to user, just keep the progress bar moving
+      console.error("Error polling for progress:", error);
     }
-  }, 3000); // Check every 3 seconds
-};
+  };
 
   const fetchTranscription = async (taskId: string) => {
     try {
@@ -111,18 +99,21 @@ const startPolling = () => {
     }
   };
 
-  const handleProgressUpdate = (progress: number) => {
-    // Ensure we never go backwards in progress (except for reset to 0)
+  const handleProgressUpdate = (progress: number, message: string) => {
+    if (progress > 0) {
+      setIsWsConnected(true);
+    }
+    
+    // Ensure we never go backwards in progress
     if (progress >= processingProgress || progress === 0) {
       setProcessingProgress(progress);
     }
     
-    // Show consistent message
-    setProcessingMessage("Processing in progress...");
+    setProcessingMessage(message);
     
-    // If progress complete, fetch the transcription
+    // If progress complete, mark as connected and notify
     if (progress === 100) {
-      fetchTranscription(taskId!);
+      setIsWsConnected(true);
     }
   }; 
 
@@ -132,7 +123,13 @@ const startPolling = () => {
     }
   };
 
-  // Remove the connection failure handler since we're not using WebSockets
+  const handleWebSocketConnectionFailed = () => {
+    setConnectionAttempts(prev => prev + 1);
+    if (connectionAttempts >= 3) {
+      setIsWsConnected(false);
+      setProcessingMessage("Processing in progress...");
+    }
+  };
 
   // Modified to handle backend preview URL
   const handleUploadSuccess = (previewUrl: string, newTaskId: string) => {
@@ -154,7 +151,8 @@ const startPolling = () => {
     setProcessingProgress(0);
     setTaskId(null);
     setProcessingMessage('Preparing to process...');
-    // WebSocket reset state removed
+    setIsWsConnected(false);
+    setConnectionAttempts(0);
   };
   
   const clearTranscription = () => {
@@ -211,15 +209,13 @@ const startPolling = () => {
     
     setIsProcessing(true);
     setProcessingProgress(5); // Start with a small progress indication
-    setProcessingMessage('Processing in progress...');
-  
+    setProcessingMessage('Starting transcription...');
+    setIsWsConnected(false);
+    setConnectionAttempts(0);
+
     try {
-      // Make sure the URL is correct
       const response = await fetch(`http://localhost:8000/transcribe/${taskId}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        }
+        method: 'POST'
       });
       
       if (!response.ok) {
@@ -229,8 +225,8 @@ const startPolling = () => {
       const data = await response.json();
       console.log('Transcription started:', data);
       
-      // Start polling for completion
-      startPolling();
+      // Update UI to show the transcription has started
+      setProcessingMessage('Processing in progress...');
     } catch (error) {
       console.error('Error starting transcription:', error);
       alert(`Failed to start transcription: ${(error as Error).message}`);
@@ -238,57 +234,14 @@ const startPolling = () => {
     }
   };
 
-// New polling function that directly checks for the transcript file
-const pollForTranscriptionCompletion = () => {
-  if (!taskId) return;
-  
-  const checkInterval = setInterval(async () => {
-    try {
-      // Try to fetch the transcription directly
-      const response = await fetch(`http://localhost:8000/transcription/${taskId}`);
-      
-      if (response.ok) {
-        // Transcription is ready
-        clearInterval(checkInterval);
-        
-        const data = await response.json();
-        if (data.transcription) {
-          setProcessingProgress(100);
-          setProcessingMessage('Processing complete!');
-          setTranscript(data.transcription);
-          setDownloadUrl(`/download/${taskId}/transcript.txt`);
-          setIsProcessing(false);
-        }
-      } else {
-        // Still processing, update progress bar
-        setProcessingProgress(prev => {
-          // Increment progress but cap at 95% until complete
-          const increment = Math.random() * 3;
-          return prev + increment > 95 ? 95 : prev + increment;
-        });
-      }
-    } catch (error) {
-      console.error('Error checking transcription status:', error);
-      // Don't show error to user, just keep the progress bar moving
+  const handleTranscribe = () => {
+    if (!taskId) {
+      alert('Please upload a file or URL first.');
+      return;
     }
-  }, 3000); // Check every 3 seconds
-  
-  // Store the interval ID for cleanup
-  return () => clearInterval(checkInterval);
-};
-
-// Use this for the polling effect in App.tsx
-useEffect(() => {
-  let cleanup: (() => void) | undefined;
-  
-  if (isProcessing && taskId) {
-    cleanup = pollForTranscriptionCompletion();
-  }
-  
-  return () => {
-    if (cleanup) cleanup();
+    
+    startTranscription();
   };
-}, [isProcessing, taskId]);
 
   const renderModuleContent = () => {
     if (activeModule === 'upload') {
@@ -362,7 +315,13 @@ useEffect(() => {
         </p>
       </div>
 
-      {/* WebSocket connection removed */}
+      {taskId && isProcessing && (
+        <WebSocketProgressHandler 
+          taskId={taskId} 
+          onProgressUpdate={handleProgressUpdate}
+          onComplete={handleProcessingComplete}
+        />
+      )}
     
       {showMainMenu ? (
         <MainMenu onSelectModule={handleModuleSelect} />
