@@ -1,4 +1,3 @@
-// components/TranscriptionDisplay.tsx
 import React, { useState } from 'react';
 
 interface TranscriptionDisplayProps {
@@ -24,20 +23,29 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
 
   // Parse the transcript to highlight speaker segments
   const formatTranscript = (text: string) => {
+    if (!text) return <p>No transcription available.</p>;
+    
     // Check if the transcript includes speaker tags like [SPEAKER_X]
-    const hasSpeakerTags = /\[SPEAKER_[A-Z]\]/g.test(text);
+    const hasSpeakerTags = /\[(SPEAKER_[A-Z]|[A-Z]+)\]/g.test(text);
     
     if (hasSpeakerTags) {
-      // Split by speaker tags [SPEAKER_X]
-      const parts = text.split(/(\[SPEAKER_[A-Z]\])/g);
+      // Split by speaker tags [SPEAKER_X] or other bracketed tags
+      const parts = text.split(/(\[[A-Z_]+\])/g);
       
       return parts.map((part, index) => {
+<<<<<<< HEAD
         if (part.match(/\[SPEAKER_[A-Z]\]/)) {
           const speaker = part.replace(/[\\[\]]/g, '');
+=======
+        if (part.match(/\[[A-Z_]+\]/)) {
+          const speaker = part.replace(/[\[\]]/g, '');
+>>>>>>> 1f99f78936574a3b1474c3d936fb83d907d547b3
           // Assign different colors based on speaker
-          const color = speaker === 'SPEAKER_A' ? 'text-blue-400' : 
-                       speaker === 'SPEAKER_B' ? 'text-gray-300' : 
-                       speaker === 'SPEAKER_C' ? 'text-gray-400' : 'text-gray-500';
+          const color = speaker.includes('SPEAKER_A') ? 'text-blue-400' : 
+                       speaker.includes('SPEAKER_B') ? 'text-green-300' : 
+                       speaker.includes('SPEAKER_C') ? 'text-yellow-300' : 
+                       speaker.includes('SPEAKER_D') ? 'text-purple-300' : 'text-gray-400';
+          
           return (
             <span key={index} className={`font-semibold ${color}`}>
               {part.replace('SPEAKER_A', 'Speaker A')
@@ -47,12 +55,16 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
             </span>
           );
         }
+        // Add line breaks for timestamps
+        if (part.includes('s - ')) {
+          return <span key={index}>{part}<br /></span>;
+        }
         return <span key={index}>{part}</span>;
       });
     } else {
       // If no speaker tags, add paragraph breaks for better readability
       return text.split('\n').map((paragraph, i) => (
-        <p key={i} className={i > 0 ? 'mt-4' : ''}>{paragraph}</p>
+        paragraph.trim() ? <p key={i} className={i > 0 ? 'mt-4' : ''}>{paragraph}</p> : <br key={i} />
       ));
     }
   };
@@ -91,6 +103,7 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
     setShowConfirmDialog(null);
   };
 
+<<<<<<< HEAD
   // Calculate statistics more robustly
   const calculateWordCount = (text: string): number => {
     // Remove punctuation and split by whitespace to count actual words
@@ -133,9 +146,19 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
   };
   
   const duration = extractDuration(transcript);
+=======
+  // Calculate statistics
+  const wordCount = transcript.split(/\s+/).filter(word => word.trim().length > 0).length;
+  const speakerATurns = (transcript.match(/\[SPEAKER_A\]/g) || []).length;
+  const speakerBTurns = (transcript.match(/\[SPEAKER_B\]/g) || []).length;
+  
+  // Try to extract duration from transcript
+  const durationMatch = transcript.match(/(\d+\.\d+)s/);
+  const duration = durationMatch ? parseFloat(durationMatch[1]).toFixed(1) : "N/A";
+>>>>>>> 1f99f78936574a3b1474c3d936fb83d907d547b3
 
   return (
-    <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 mt-6 shadow-sm">
+    <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 shadow-sm">
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-2xl font-bold text-gray-200">Transcription Result</h2>
       </div>

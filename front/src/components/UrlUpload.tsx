@@ -1,5 +1,5 @@
 // components/UrlUpload.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 interface UrlUploadProps {
   setTaskId: (taskId: string) => void;
@@ -21,14 +21,21 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
   const [isValidUrl, setIsValidUrl] = useState<boolean>(false);
   const [urlError, setUrlError] = useState<string | null>(null);
   const [uploadXhr, setUploadXhr] = useState<XMLHttpRequest | null>(null);
+  const [taskId, setTaskId] = useState<string | null>(null);
+  const [wsConnection, setWsConnection] = useState<WebSocket | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [audioLoaded, setAudioLoaded] = useState<boolean>(false);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
 
-  // Handle URL input change
+  // Basic URL validation
   const handleUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const inputUrl = e.target.value;
     setUrl(inputUrl);
     
-    // Clear previous errors
+    // Clear previous errors and states
     setUrlError(null);
+    setAudioLoaded(false);
+    setAudioUrl(null);
     
     // Validate the URL (basic validation)
     if (inputUrl.trim() !== '') {
@@ -70,8 +77,16 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
       setUploadXhr(null);
     }
     
-    // Reset uploading state
+    // Close WebSocket connection if active
+    if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+      wsConnection.close();
+      setWsConnection(null);
+    }
+    
+    // Reset states
+    setTaskId(null);
     setIsUploading(false);
+    setIsProcessing(false);
     setUploadProgress(0);
   };
 
@@ -83,14 +98,11 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
     }
     
     setIsUploading(true);
-    setUploadProgress(0);
+    setUploadProgress(5);
+    setUrlError(null);
     
-    // Create form data with the URL
-    const formData = new FormData();
-    formData.append('url', url);
-
     try {
-      // Implement XMLHttpRequest for progress tracking
+      // Create xhr for tracking and cancellation
       const xhr = new XMLHttpRequest();
       setUploadXhr(xhr);
       
@@ -184,10 +196,22 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
     setUrl('');
     setIsValidUrl(false);
     setUrlError(null);
+    setAudioLoaded(false);
+    setAudioUrl(null);
+    // Also notify parent component to clear audio preview
+    const emptyBlob = new Blob([], { type: 'audio/mp3' });
+    const emptyFile = new File([emptyBlob], 'empty.mp3', { type: 'audio/mp3' });
+    onFileSelected(emptyFile);
+    clearTranscription();
   };
 
   return (
     <div className="flex flex-col">
+      <h2 className="text-xl font-bold text-gray-200 mb-4">Audio from URL</h2>
+      <p className="text-gray-400 mb-6 text-center">
+        Enter a direct URL to an audio file for transcription.
+      </p>
+      
       <div className="mb-4">
         <label htmlFor="audio-url" className="block text-sm font-medium text-gray-300 mb-1">
           Audio/Video URL
@@ -219,11 +243,25 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
           )}
         </div>
         {urlError && (
-          <p className="mt-1 text-sm text-red-400">{urlError}</p>
+          <p className={`mt-1 text-sm ${urlError.startsWith('Note') ? 'text-blue-400' : urlError.startsWith('URL may') ? 'text-yellow-400' : 'text-red-400'}`}>
+            {urlError}
+          </p>
         )}
         <p className="mt-1 text-sm text-gray-400">
           Paste a link to an audio file from Google Drive. Make sure the file is publicly accessible.
         </p>
+        
+        {/* Google Drive specific helper */}
+        {url && url.includes('drive.google.com') && (
+          <div className="mt-2 p-2 bg-blue-900/30 border border-blue-800 rounded-lg text-xs text-blue-300">
+            <p className="font-medium mb-1">Google Drive Links:</p>
+            <ol className="list-decimal list-inside space-y-1 ml-1">
+              <li>Open your Google Drive file</li>
+              <li>Click "Share" and set access to "Anyone with the link"</li>
+              <li>For best results, use the direct download link format</li>
+            </ol>
+          </div>
+        )}
       </div>
       
       <div className="bg-gray-700 border border-gray-600 rounded-lg p-4 mb-4">
@@ -251,7 +289,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
       
       {!uploadXhr ? (
         <button
-          onClick={handleUpload}
+          onClick={handleLoadAudio}
           disabled={!url || !isValidUrl}
           className={`w-full py-3 px-5 text-white font-bold rounded-lg transition-all duration-300 
             ${!url || !isValidUrl
@@ -261,15 +299,59 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
         >
           Google Drive URL Upload
         </button>
-      ) : (
+      )}
+      
+      {/* Loading indicator */}
+      {isLoading && (
+        <button
+          disabled
+          className="w-full py-3 px-5 text-white font-bold rounded-lg bg-blue-600 flex items-center justify-center"
+        >
+          <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          Loading Audio...
+        </button>
+      )}
+      
+      {/* Step 2 - Transcribe Button (after audio is loaded) */}
+      {audioLoaded && !taskId && (
+        <button
+          onClick={handleTranscribe}
+          className="w-full py-3 px-5 mt-4 text-white font-bold rounded-lg transition-all duration-300 
+            bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg"
+        >
+          Transcribe Audio
+        </button>
+      )}
+      
+      {/* Cancel button (during transcription) */}
+      {taskId && (isUploading || isProcessing) && (
         <button
           onClick={handleCancelUpload}
           className="w-full py-3 px-5 text-white font-bold rounded-lg transition-all duration-300 
             bg-red-600 hover:bg-red-700 active:scale-98 shadow-lg"
         >
-          Cancel Upload
+          Cancel Transcription
         </button>
       )}
+      
+      {/* Additional help information */}
+      <div className="mt-6 bg-gray-700 p-3 rounded-lg text-sm border border-gray-600">
+        <h3 className="font-semibold text-gray-200 mb-1 flex items-center">
+          <svg className="w-4 h-4 mr-1 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+          </svg>
+          Supported URL Types
+        </h3>
+        <ul className="list-disc list-inside text-gray-300 mt-1">
+          <li>Direct audio file links (.mp3, .wav, .ogg, etc.)</li>
+          <li>Google Drive shared audio files</li>
+          <li>Dropbox shared audio files</li>
+          <li>Other cloud storage links (must be publicly accessible)</li>
+        </ul>
+      </div>
     </div>
   );
 };
