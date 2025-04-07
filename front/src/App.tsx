@@ -8,7 +8,7 @@ import MainMenu from './components/MainMenu';
 import ProgressBar from './components/ProgressBar';
 import ResetButton from './components/ResetButton';
 import ClearButton from './components/ClearButton';
-import WebSocketProgressHandler from './components/WebSocketProgressHandler';
+//import WebSocketProgressHandler from './components/WebSocketProgressHandler';
 import './index.css';
 
 type AudioSource = {
@@ -44,40 +44,48 @@ const App: React.FC = () => {
   // Effect to poll for progress when processing is active
   useEffect(() => {
     if (isProcessing && taskId) {
-      // Poll for progress every 2 seconds
-      const pollInterval = setInterval(() => {
-        pollTaskProgress(taskId);
-      }, 2000);
+      // Start the polling once when processing begins
+      startPolling();
       
-      return () => clearInterval(pollInterval);
+      // No need to have an interval that calls startPolling repeatedly
+      // startPolling itself sets up its own interval
     }
   }, [isProcessing, taskId]);
 
-  const pollTaskProgress = async (taskId: string) => {
+const startPolling = () => {
+  if (!taskId) return;
+  
+  const pollingInterval = setInterval(async () => {
     try {
-      const response = await fetch(`http://localhost:8000/task/${taskId}/result`);
+      // Try to fetch the transcription directly
+      const response = await fetch(`http://localhost:8000/transcription/${taskId}`);
+      
       if (response.ok) {
-        const data = await response.json();
+        // Transcription is ready
+        clearInterval(pollingInterval);
         
-        // If we have a download URL, processing is complete
-        if (data.download_url) {
+        const data = await response.json();
+        if (data.transcription) {
           setProcessingProgress(100);
-          setProcessingMessage("Processing complete!");
-          setDownloadUrl(data.download_url);
-          fetchTranscription(taskId);
-        } else {
-          // Simulate progress increment while processing is ongoing
-          setProcessingProgress(prev => {
-            // Incrementally increase progress but cap at 95% until complete
-            const newProgress = prev + Math.random() * 3;
-            return newProgress > 95 ? 95 : newProgress;
-          });
+          setProcessingMessage('Processing complete!');
+          setTranscript(data.transcription);
+          setDownloadUrl(`/download/${taskId}/transcript.txt`);
+          setIsProcessing(false);
         }
+      } else {
+        // Still processing, update progress bar
+        setProcessingProgress(prev => {
+          // Increment progress but cap at 95% until complete
+          const increment = Math.random() * 3;
+          return prev + increment > 95 ? 95 : prev + increment;
+        });
       }
     } catch (error) {
-      console.error("Error polling for progress:", error);
+      console.error('Error checking transcription status:', error);
+      // Don't show error to user, just keep the progress bar moving
     }
-  };
+  }, 3000); // Check every 3 seconds
+};
 
   const fetchTranscription = async (taskId: string) => {
     try {
@@ -195,40 +203,40 @@ const App: React.FC = () => {
     }
   };
 
-const startTranscription = async () => {
-  if (!taskId) {
-    alert('No task ID available. Please upload a file or URL first.');
-    return;
-  }
-  
-  setIsProcessing(true);
-  setProcessingProgress(5); // Start with a small progress indication
-  setProcessingMessage('Processing in progress...');
-
-  try {
-    // Make sure the URL is correct
-    const response = await fetch(`http://localhost:8000/transcribe/${taskId}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Server error: ${response.status} ${response.statusText}`);
+  const startTranscription = async () => {
+    if (!taskId) {
+      alert('No task ID available. Please upload a file or URL first.');
+      return;
     }
     
-    const data = await response.json();
-    console.log('Transcription started:', data);
-    
-    // Start polling for completion
-    pollForTranscriptionCompletion();
-  } catch (error) {
-    console.error('Error starting transcription:', error);
-    alert(`Failed to start transcription: ${(error as Error).message}`);
-    setIsProcessing(false);
-  }
-};
+    setIsProcessing(true);
+    setProcessingProgress(5); // Start with a small progress indication
+    setProcessingMessage('Processing in progress...');
+  
+    try {
+      // Make sure the URL is correct
+      const response = await fetch(`http://localhost:8000/transcribe/${taskId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.status} ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      console.log('Transcription started:', data);
+      
+      // Start polling for completion
+      startPolling();
+    } catch (error) {
+      console.error('Error starting transcription:', error);
+      alert(`Failed to start transcription: ${(error as Error).message}`);
+      setIsProcessing(false);
+    }
+  };
 
 // New polling function that directly checks for the transcript file
 const pollForTranscriptionCompletion = () => {
