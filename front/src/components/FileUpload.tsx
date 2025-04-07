@@ -1,5 +1,5 @@
 // components/FileUpload.tsx
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 
 interface FileUploadProps {
   setTaskId: (taskId: string) => void;
@@ -20,8 +20,6 @@ const FileUpload: React.FC<FileUploadProps> = ({
   const [dragActive, setDragActive] = useState(false);
   const [uploadXhr, setUploadXhr] = useState<XMLHttpRequest | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
-  const [taskId, setTaskId] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Validate file type - prioritizing WAV and MP3 formats (most compatible)
   const isValidFileType = (file: File): boolean => {
@@ -122,21 +120,19 @@ const FileUpload: React.FC<FileUploadProps> = ({
     
     // Reset uploading state
     setIsUploading(false);
-    setIsProcessing(false);
     setUploadProgress(0);
   };
 
-  const handleUpload = async (fileToUpload: File = file) => {
-    if (!fileToUpload) {
+  const handleUpload = async () => {
+    if (!file) {
       alert('Please select a file first.');
       return;
     }
     
     setIsUploading(true);
-    setIsProcessing(false); // Make sure we start in the upload phase
     setUploadProgress(0);
     const formData = new FormData();
-    formData.append('file', fileToUpload);
+    formData.append('file', file);
 
     try {
       // Implement XMLHttpRequest for progress tracking
@@ -175,15 +171,11 @@ const FileUpload: React.FC<FileUploadProps> = ({
 
       xhr.onerror = function() {
         setUploadXhr(null);
-        setFileError("Network error occurred during upload");
-        setIsUploading(false);
-        setIsProcessing(false);
+        throw new Error('Network error occurred');
       };
 
       xhr.onabort = function() {
         console.log('Upload aborted');
-        setIsUploading(false);
-        setIsProcessing(false);
       };
 
       xhr.send(formData);
@@ -191,9 +183,23 @@ const FileUpload: React.FC<FileUploadProps> = ({
       console.error('Upload failed:', error);
       alert(`There was an error uploading your file: ${(error as Error).message}`);
       setIsUploading(false);
-      setIsProcessing(false);
       setUploadXhr(null);
     }
+  };
+
+  const handleCompleteReset = () => {
+    // Reset the file state
+    setFile(null);
+    setFileError(null);
+    
+    // Reset file input
+    const fileInput = document.getElementById('fileInput') as HTMLInputElement;
+    if (fileInput) {
+      fileInput.value = '';
+    }
+    
+    // Clear any transcription
+    clearTranscription();
   };
 
   return (
@@ -210,10 +216,9 @@ const FileUpload: React.FC<FileUploadProps> = ({
         onDragLeave={handleDrag}
         onDragOver={handleDrag}
         onDrop={handleDrop}
-        onClick={() => fileInputRef.current?.click()}
+        onClick={() => document.getElementById('fileInput')?.click()}
       >
         <input
-          ref={fileInputRef}
           id="fileInput"
           type="file"
           accept=".wav,.mp4,.mp3,.webm,.ogg,.flac,.m4a,.aac"

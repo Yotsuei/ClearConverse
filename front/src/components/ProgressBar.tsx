@@ -9,6 +9,9 @@ interface ProgressBarProps {
 }
 
 const ProgressBar: React.FC<ProgressBarProps> = ({ progress, type, onCancel, message }) => {
+  // Determine if progress bar should show indeterminate loading animation
+  const isIndeterminate = progress < 10;
+  
   // Determine the stage based on progress percentage and type
   const getStage = () => {
     if (message) {
@@ -22,7 +25,7 @@ const ProgressBar: React.FC<ProgressBarProps> = ({ progress, type, onCancel, mes
       if (progress < 90) return "Upload complete...";
       return "Preparing for processing...";
     } else { // processing
-      if (progress < 10) return "Analyzing audio...";
+      if (progress < 10) return "Initializing transcription...";
       if (progress < 30) return "Building speaker profiles...";
       if (progress < 50) return "Detecting speech segments...";
       if (progress < 70) return "Processing overlapping speech...";
@@ -54,7 +57,9 @@ const ProgressBar: React.FC<ProgressBarProps> = ({ progress, type, onCancel, mes
       <div className="mb-2 flex justify-between items-center">
         <div className={`text-sm font-medium ${getTextColor()}`}>{getStage()}</div>
         <div className="flex items-center gap-3">
-          <div className={`text-sm font-medium ${getTextColor()}`}>{Math.round(progress)}%</div>
+          <div className={`text-sm font-medium ${getTextColor()}`}>
+            {isIndeterminate ? '' : `${Math.round(progress)}%`}
+          </div>
           
           {/* Cancel button */}
           {onCancel && progress < 100 && (
@@ -72,20 +77,43 @@ const ProgressBar: React.FC<ProgressBarProps> = ({ progress, type, onCancel, mes
         </div>
       </div>
       <div className="relative w-full h-2.5 bg-gray-700 rounded-full overflow-hidden">
-        {/* Background pulse animation when in progress */}
-        <div 
-          className={`absolute inset-0 ${getBgColor()} opacity-30`}
-          style={{ 
-            animation: progress < 100 ? 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite' : 'none',
-          }}
-        />
-        
-        {/* Actual progress bar */}
-        <div 
-          className={`h-full ${getBgColor()} rounded-full transition-all duration-300 ease-out`}
-          style={{ width: `${progress}%` }}
-        />
+        {/* Indeterminate animation for initial loading or error states */}
+        {isIndeterminate ? (
+          <div 
+            className={`absolute top-0 bottom-0 left-0 ${getBgColor()}`}
+            style={{ 
+              width: '30%',
+              animation: 'indeterminate 1.5s infinite ease-in-out',
+            }}
+          />
+        ) : (
+          <>
+            {/* Background pulse animation when in progress */}
+            <div 
+              className={`absolute inset-0 ${getBgColor()} opacity-30`}
+              style={{ 
+                animation: progress < 100 ? 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite' : 'none',
+              }}
+            />
+            
+            {/* Actual progress bar */}
+            <div 
+              className={`h-full ${getBgColor()} rounded-full transition-all duration-300 ease-out`}
+              style={{ width: `${progress}%` }}
+            />
+          </>
+        )}
       </div>
+      
+      {/* Error message block - show in red if message contains "error" */}
+      {message && message.toLowerCase().includes('error') && (
+        <div className="mt-2 text-sm text-red-400 flex items-center gap-2">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+          </svg>
+          {message}
+        </div>
+      )}
       
       <style jsx>{`
         @keyframes pulse {
@@ -94,6 +122,15 @@ const ProgressBar: React.FC<ProgressBarProps> = ({ progress, type, onCancel, mes
           }
           50% {
             opacity: 0.6;
+          }
+        }
+        
+        @keyframes indeterminate {
+          0% {
+            left: -30%;
+          }
+          100% {
+            left: 100%;
           }
         }
       `}</style>

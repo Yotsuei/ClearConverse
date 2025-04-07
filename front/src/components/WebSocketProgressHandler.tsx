@@ -1,5 +1,5 @@
 // components/WebSocketProgressHandler.tsx
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 
 interface WebSocketProgressHandlerProps {
   taskId: string | null;
@@ -12,32 +12,44 @@ const WebSocketProgressHandler: React.FC<WebSocketProgressHandlerProps> = ({
   onProgressUpdate,
   onComplete
 }) => {
-  const [socket, setSocket] = useState<WebSocket | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const socketRef = useRef<WebSocket | null>(null);
+  const reconnectAttempts = useRef(0);
+  const maxReconnectAttempts = 5;
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  useEffect(() => {
+  // Function to establish WebSocket connection
+  const connectWebSocket = () => {
     if (!taskId) return;
 
     // Clean up previous socket if exists
-    if (socket) {
-      socket.close();
+    if (socketRef.current && socketRef.current.readyState !== WebSocket.CLOSED) {
+      socketRef.current.close();
     }
 
-    const wsUrl = process.env.NODE_ENV === 'development' 
-      ? `ws://localhost:8000/ws/progress/${taskId}`
-      : `wss://${window.location.host}/ws/progress/${taskId}`; // For production using HTTPS
+    const wsUrl = `ws://localhost:8000/ws/progress/${taskId}`;
+    console.log(`Connecting to WebSocket: ${wsUrl}`);
 
     const ws = new WebSocket(wsUrl);
+    socketRef.current = ws;
 
     // Set up event handlers
     ws.onopen = () => {
       console.log(`WebSocket connection established for task ${taskId}`);
+      reconnectAttempts.current = 0; // Reset reconnect attempts on successful connection
+      onProgressUpdate(5, "Connected to server. Waiting for processing to begin...");
     };
 
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
         console.log('WebSocket data received:', data);
+        
+        // Handle initial connection message
+        if (data.status === "connected") {
+          console.log("WebSocket connection acknowledged");
+          return;
+        }
         
         // Update the progress with the exact message from backend
         if (data.progress !== undefined && data.message !== undefined) {
@@ -58,17 +70,45 @@ const WebSocketProgressHandler: React.FC<WebSocketProgressHandlerProps> = ({
     ws.onerror = (event) => {
       console.error('WebSocket error:', event);
       setError('WebSocket connection error');
-      onProgressUpdate(0, 'Connection error. Please try again.');
+      
+      // Show indeterminate progress with error message
+      onProgressUpdate(5, 'Connection error. Attempting to reconnect...');
     };
 
-    ws.onclose = () => {
-      console.log('WebSocket connection closed');
+    ws.onclose = (event) => {
+      console.log(`WebSocket connection closed: ${event.code} ${event.reason}`);
+      
+      // Attempt to reconnect unless this was a normal closure
+      if (event.code !== 1000 && reconnectAttempts.current < maxReconnectAttempts) {
+        const timeoutDelay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 10000);
+        console.log(`Attempting to reconnect in ${timeoutDelay}ms (attempt ${reconnectAttempts.current + 1}/${maxReconnectAttempts})`);
+        
+        reconnectAttempts.current += 1;
+        onProgressUpdate(5, `Connection lost. Reconnecting (attempt ${reconnectAttempts.current}/${maxReconnectAttempts})...`);
+        
+        // Set timeout for reconnection
+        reconnectTimeoutRef.current = setTimeout(() => {
+          connectWebSocket();
+        }, timeoutDelay);
+      } else if (reconnectAttempts.current >= maxReconnectAttempts) {
+        console.log('Maximum reconnection attempts reached');
+        onProgressUpdate(0, 'Connection failed. Please try restarting the transcription.');
+      }
     };
+  };
+
+  useEffect(() => {
+    if (taskId) {
+      connectWebSocket();
+    }
 
     // Clean up on unmount
     return () => {
-      if (ws) {
-        ws.close();
+      if (socketRef.current) {
+        socketRef.current.close();
+      }
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
       }
     };
   }, [taskId]);

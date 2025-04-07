@@ -12,7 +12,7 @@ import WebSocketProgressHandler from './components/WebSocketProgressHandler';
 import './index.css';
 
 type AudioSource = {
-  previewUrl: string | null; // Changed from url to previewUrl
+  previewUrl: string | null;
 };
 
 type Module = 'upload' | 'url';
@@ -30,6 +30,7 @@ const App: React.FC = () => {
   const [taskId, setTaskId] = useState<string | null>(null);
   const [processingMessage, setProcessingMessage] = useState<string>('Preparing to process...');
   const [isWsConnected, setIsWsConnected] = useState(false);
+  const [connectionAttempts, setConnectionAttempts] = useState(0);
   
   // Add XHR reference to allow cancellation of in-progress requests
   const xhrRef = useRef<XMLHttpRequest | null>(null);
@@ -40,6 +41,39 @@ const App: React.FC = () => {
       fetchTranscription(taskId);
     }
   }, [processingProgress, taskId]);
+
+  // Effect to handle websocket connection failures
+  useEffect(() => {
+    if (connectionAttempts > 0 && !isWsConnected && isProcessing) {
+      // Poll for progress as a fallback if WebSocket fails
+      const pollInterval = setInterval(() => {
+        if (taskId) {
+          pollTaskProgress(taskId);
+        }
+      }, 2000);
+      
+      return () => clearInterval(pollInterval);
+    }
+  }, [connectionAttempts, isWsConnected, isProcessing, taskId]);
+
+  const pollTaskProgress = async (taskId: string) => {
+    try {
+      const response = await fetch(`http://localhost:8000/task/${taskId}/result`);
+      if (response.ok) {
+        const data = await response.json();
+        
+        // If we have a download URL, processing is complete
+        if (data.download_url) {
+          setProcessingProgress(100);
+          setProcessingMessage("Processing complete!");
+          setDownloadUrl(data.download_url);
+          fetchTranscription(taskId);
+        }
+      }
+    } catch (error) {
+      console.error("Error polling for progress:", error);
+    }
+  };
 
   const fetchTranscription = async (taskId: string) => {
     try {
@@ -66,16 +100,34 @@ const App: React.FC = () => {
   };
 
   const handleProgressUpdate = (progress: number, message: string) => {
-    if (progress > 0 && !isWsConnected) {
+    if (progress > 0) {
       setIsWsConnected(true);
     }
-    setProcessingProgress(progress);
+    
+    // Ensure we never go backwards in progress
+    if (progress >= processingProgress || progress === 0) {
+      setProcessingProgress(progress);
+    }
+    
     setProcessingMessage(message);
+    
+    // If progress complete, mark as connected and notify
+    if (progress === 100) {
+      setIsWsConnected(true);
+    }
   }; 
 
   const handleProcessingComplete = (downloadUrl: string) => {
     if (downloadUrl) {
       setDownloadUrl(downloadUrl);
+    }
+  };
+
+  const handleWebSocketConnectionFailed = () => {
+    setConnectionAttempts(prev => prev + 1);
+    if (connectionAttempts >= 3) {
+      setIsWsConnected(false);
+      setProcessingMessage("Connection error. Using fallback method to check progress...");
     }
   };
 
@@ -99,6 +151,8 @@ const App: React.FC = () => {
     setProcessingProgress(0);
     setTaskId(null);
     setProcessingMessage('Preparing to process...');
+    setIsWsConnected(false);
+    setConnectionAttempts(0);
   };
   
   const clearTranscription = () => {
@@ -154,8 +208,10 @@ const App: React.FC = () => {
     }
     
     setIsProcessing(true);
-    setProcessingProgress(0);
+    setProcessingProgress(5); // Start with a small progress indication
     setProcessingMessage('Starting transcription...');
+    setIsWsConnected(false);
+    setConnectionAttempts(0);
 
     try {
       const response = await fetch(`http://localhost:8000/transcribe/${taskId}`, {
@@ -168,6 +224,9 @@ const App: React.FC = () => {
       
       const data = await response.json();
       console.log('Transcription started:', data);
+      
+      // Update UI to show the transcription has started
+      setProcessingMessage('Transcription initiated, connecting to progress updates...');
     } catch (error) {
       console.error('Error starting transcription:', error);
       alert(`Failed to start transcription: ${(error as Error).message}`);
@@ -298,6 +357,14 @@ const App: React.FC = () => {
             <div className="mt-6">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-lg font-semibold text-gray-200">Processing Progress</h3>
+                {!isWsConnected && connectionAttempts > 0 && (
+                  <span className="text-yellow-400 text-xs font-medium flex items-center gap-1">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    Live updates unavailable
+                  </span>
+                )}
               </div>
               <ProgressBar 
                 progress={processingProgress} 
@@ -305,7 +372,6 @@ const App: React.FC = () => {
                 onCancel={cancelTranscription}
                 message={processingMessage}
               />
-              <p className="text-sm text-gray-400 mt-2">{processingMessage}</p>
             </div>
           )}
 
