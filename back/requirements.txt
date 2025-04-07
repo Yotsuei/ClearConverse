@@ -1,22 +1,25 @@
 # back/requirements.txt
 
 # Core web framework
-fastapi==0.105.0
-uvicorn==0.24.0
-python-multipart==0.0.6
-pydantic==2.5.2
-python-dotenv==1.0.0
+fastapi
+uvicorn
+python-multipart
+pydantic
+python-dotenv
 
-# Audio and ML libraries
-torch==2.1.1
-torchaudio==2.1.1
-whisper==1.1.10
-pyannote.audio==3.1.1
-speechbrain==0.5.15
-noisereduce==2.0.1
-numpy==1.26.2
+# Audio and ML libraries (with CUDA support)
+--find-links https://download.pytorch.org/whl/cu121
+torch==2.5.1
+torchaudio==2.5.1
+triton==2.0.0
+openai-whisper
+pyannote.audio
+speechbrain
+noisereduce
+numpy
 
 # Utilities
-apscheduler==3.10.4
-requests==2.31.0
-validators==0.22.0
+apscheduler
+requests
+validators
+safetensors

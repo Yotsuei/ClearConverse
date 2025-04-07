@@ -41,6 +41,17 @@ from urllib.parse import urlparse
 import validators
 import re
 
+import warnings
+
+# Filter specific warnings
+warnings.filterwarnings("ignore", message=".*Failed to launch Triton kernels.*")
+warnings.filterwarnings("ignore", message=".*TensorFloat-32.*")
+warnings.filterwarnings("ignore", message=".*degrees of freedom is <= 0.*")
+
+# Adjust logging level to ignore warnings
+logging.getLogger("pyannote").setLevel(logging.ERROR)
+logging.getLogger("whisper").setLevel(logging.ERROR)
+
 # =============================================================================
 # Logging setup
 # =============================================================================
@@ -93,7 +104,7 @@ class Config:
     max_embedding_segments: int = 100  
     enhance_separated_audio: bool = True
     use_vad_refinement: bool = True
-    speaker_embedding_threshold: float = 0.45  
+    speaker_embedding_threshold: float = 0.40  
     noise_reduction_amount: float = 0.65  
     transcription_batch_size: int = 8
     use_speaker_embeddings: bool = True
@@ -104,7 +115,7 @@ class Config:
     transcribe_overlaps_individually: bool = True
     sliding_window_size: float = 1.0  
     sliding_window_step: float = 0.5  
-    secondary_diarization_threshold: float = 0.35
+    secondary_diarization_threshold: float = 0.30
 
 # =============================================================================
 # Utility Functions 
@@ -313,31 +324,160 @@ class EnhancedAudioProcessor:
 
     def _initialize_models(self):
         logging.info(f"Initializing models on {self.device}...")
-        cache_dir = env_config['model_cache_dir']  # Set your custom cache directory here
-
-        self.separator = SepformerSeparation.from_hparams(
-            source="speechbrain/resepformer-wsj02mix",
-            savedir=os.path.join(cache_dir, "resepformer"),
-            run_opts={"device": self.device}
-        )
-        self.whisper_model = whisper.load_model(self.config.whisper_model_size, download_root=os.path.join(cache_dir, "whisper")).to(self.device)
-        self.diarization = Pipeline.from_pretrained(
-            "pyannote/speaker-diarization-3.1",
-            use_auth_token=self.config.auth_token,
-            cache_dir=os.path.join(cache_dir, "speaker-diarization")
-        ).to(self.device)
-        self.vad_pipeline = Pipeline.from_pretrained(
-            "pyannote/voice-activity-detection",
-            use_auth_token=self.config.auth_token,
-            cache_dir=os.path.join(cache_dir, "vad")
-        ).to(self.device)
-        self.embedding_model = Inference(
-            "pyannote/embedding",
-            window="whole",
-            use_auth_token=self.config.auth_token,
-        ).to(self.device)
+        cache_dir = env_config['model_cache_dir']
+        
+        # 1. Load fine-tuned RESepFormer model
+        self._load_resepformer_model(cache_dir)
+        
+        # 2. Load fine-tuned Whisper model
+        self._load_whisper_model(cache_dir)
+        
+        # 3. Initialize PyAnnote models
+        self._initialize_pyannote_models(cache_dir)
         
         logging.info("Models initialized successfully!")
+
+    def _load_whisper_model(self, cache_dir):
+        """Load the fine-tuned Whisper model if available, otherwise use the base model"""
+        logging.info("Loading Whisper model...")
+        whisper_path = os.path.join(cache_dir, "whisper")
+        model_dir = os.path.join(whisper_path, self.config.whisper_model_size)
+        
+        try:
+            # Load base model first
+            base_model = whisper.load_model(
+                self.config.whisper_model_size, 
+                download_root=whisper_path
+            )
+            
+            # Check for fine-tuned models
+            whisper_ft_path = os.path.join(cache_dir, "whisper-ft")
+            if os.path.exists(whisper_ft_path):
+                # Try loading safetensors first
+                if os.path.exists(os.path.join(whisper_ft_path, "model.safetensors")):
+                    logging.info("Loading fine-tuned Whisper model from safetensors...")
+                    try:
+                        from safetensors.torch import load_file
+                        state_dict = load_file(os.path.join(whisper_ft_path, "model.safetensors"), device="cpu")
+                        base_model.load_state_dict(state_dict, strict=False)
+                        logging.info("Fine-tuned Whisper model loaded successfully from safetensors!")
+                    except Exception as e:
+                        logging.error(f"Failed to load Whisper model from safetensors: {str(e)}")
+                
+                # Try loading PT file if safetensors failed or doesn't exist
+                elif os.path.exists(os.path.join(whisper_ft_path, "model.pt")):
+                    logging.info("Loading fine-tuned Whisper model from PT file...")
+                    try:
+                        checkpoint = torch.load(os.path.join(whisper_ft_path, "model.pt"), map_location="cpu")
+                        base_model.load_state_dict(checkpoint, strict=False)
+                        logging.info("Fine-tuned Whisper model loaded successfully from PT file!")
+                    except Exception as e:
+                        logging.error(f"Failed to load Whisper model from PT file: {str(e)}")
+            
+            self.whisper_model = base_model.to(self.device)
+        except Exception as e:
+            logging.error(f"Failed to initialize Whisper model: {str(e)}")
+            # Fallback to smaller model if available
+            try:
+                logging.warning(f"Falling back to small.en Whisper model")
+                self.whisper_model = whisper.load_model("small.en", download_root=whisper_path).to(self.device)
+            except Exception as fallback_error:
+                logging.error(f"Critical failure loading any Whisper model: {str(fallback_error)}")
+                raise RuntimeError("Could not initialize Whisper model")
+
+    def _load_resepformer_model(self, cache_dir):
+        """Load the fine-tuned RESepFormer model if available, otherwise use the base model"""
+        logging.info("Loading RESepFormer model...")
+        resepformer_path = os.path.join(cache_dir, "resepformer")
+        ft_model_path = os.path.join(cache_dir, "resepformer-ft")
+        
+        try:
+            # First, load the base model to ensure we have a fallback
+            self.separator = SepformerSeparation.from_hparams(
+                source="speechbrain/resepformer-wsj02mix",
+                savedir=resepformer_path,
+                run_opts={"device": self.device}
+            )
+            
+            # If fine-tuned model exists, try to load it
+            if os.path.exists(ft_model_path):
+                logging.info("Found fine-tuned RESepFormer model. Attempting to load...")
+                
+                # Similar to the Google Colab approach, create a temporary working directory
+                import tempfile
+                import shutil
+                
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    # Check required files
+                    required_files = ['hyperparams.yaml', 'masknet.ckpt', 'encoder.ckpt', 'decoder.ckpt']
+                    all_files_exist = all(os.path.exists(os.path.join(ft_model_path, f)) for f in required_files)
+                    
+                    if all_files_exist:
+                        # Copy required files to temp dir
+                        for f in required_files:
+                            shutil.copy(os.path.join(ft_model_path, f), os.path.join(tmpdir, f))
+                        
+                        # Load state dict components with map_location to handle CUDA->CPU conversion
+                        state_dict = {
+                            'masknet': torch.load(os.path.join(ft_model_path, 'masknet.ckpt'), map_location=self.device),
+                            'encoder': torch.load(os.path.join(ft_model_path, 'encoder.ckpt'), map_location=self.device),
+                            'decoder': torch.load(os.path.join(ft_model_path, 'decoder.ckpt'), map_location=self.device)
+                        }
+                        
+                        # Apply the component weights to our model
+                        self.separator.load_state_dict(state_dict, strict=False)
+                        logging.info("Fine-tuned RESepFormer model loaded successfully!")
+                    else:
+                        logging.warning(f"Missing required files for fine-tuned RESepFormer. Using base model instead.")
+            else:
+                logging.info("No fine-tuned RESepFormer model found. Using base model.")
+        
+        except Exception as e:
+            logging.error(f"Failed to load RESepFormer model: {str(e)}")
+            # Attempt fallback to base model if we haven't loaded it yet
+            try:
+                logging.warning(f"Falling back to base RESepFormer model")
+                self.separator = SepformerSeparation.from_hparams(
+                    source="speechbrain/resepformer-wsj02mix",
+                    savedir=resepformer_path,
+                    run_opts={"device": self.device}
+                )
+            except Exception as fallback_error:
+                logging.error(f"Critical failure loading any RESepFormer model: {str(fallback_error)}")
+                raise RuntimeError("Could not initialize RESepFormer model")
+
+    def _initialize_pyannote_models(self, cache_dir):
+        """Initialize PyAnnote models for diarization, VAD, and speaker embedding"""
+        try:
+            logging.info("Initializing PyAnnote models...")
+            
+            # Set up cache directories
+            diarization_cache = os.path.join(cache_dir, "speaker-diarization")
+            vad_cache = os.path.join(cache_dir, "vad")
+            embedding_cache = os.path.join(cache_dir, "embedding")
+            
+            self.embedding_model = Inference(
+                "pyannote/embedding",
+                window="whole",
+                use_auth_token=self.config.auth_token,
+            ).to(self.device)
+
+            self.vad_pipeline = Pipeline.from_pretrained(
+                "pyannote/voice-activity-detection",
+                use_auth_token=self.config.auth_token,
+                cache_dir=vad_cache
+            ).to(self.device)
+
+            self.diarization = Pipeline.from_pretrained(
+                "pyannote/speaker-diarization-3.1",
+                use_auth_token=self.config.auth_token,
+                cache_dir=diarization_cache
+            ).to(self.device)
+            
+            logging.info("PyAnnote models initialized successfully!")
+        except Exception as e:
+            logging.error(f"Failed to initialize PyAnnote models: {str(e)}")
+            raise RuntimeError("Could not initialize PyAnnote models")
 
     def load_audio(self, file_path: str) -> Tuple[torch.Tensor, int]:
         logging.info(f"Loading audio from {file_path}")
@@ -1064,5 +1204,38 @@ def health_check():
 # Main Entry Point
 # =============================================================================
 
+def setup_model_directories():
+    """Create the model directory structure if it doesn't exist"""
+    cache_dir = env_config['model_cache_dir']
+    
+    # Create main model directory
+    os.makedirs(cache_dir, exist_ok=True)
+    
+    # Create subdirectories for each model type
+    model_dirs = [
+        "whisper", "whisper-ft", "resepformer", "resepformer-ft",
+        "speaker-diarization", "vad", "embedding"
+    ]
+    
+    for dir_name in model_dirs:
+        os.makedirs(os.path.join(cache_dir, dir_name), exist_ok=True)
+    
+    logging.info(f"Model directory structure created at {cache_dir}")
+
+def setup_torch_optimizations():
+    """Setup PyTorch optimizations for faster processing"""
+    # Enable TF32 for faster processing if available
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    
+    # You could add other optimizations here in the future
+    logging.info("PyTorch optimizations enabled")
+
 if __name__ == "__main__":
+    # Setup optimizations
+    setup_torch_optimizations()
+    
+    # Create model directories 
+    setup_model_directories()
+    
     uvicorn.run(app, host="0.0.0.0", port=env_config['api_port'])
