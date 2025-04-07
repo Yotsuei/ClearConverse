@@ -10,6 +10,7 @@ import ResetButton from './components/ResetButton';
 import ClearButton from './components/ClearButton';
 import FloatingActionButton from './components/FloatingActionButton';
 import './index.css';
+import config from './config';
 
 type AudioSource = {
   file: File | null;

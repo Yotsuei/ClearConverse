@@ -30,6 +30,26 @@ from speechbrain.inference import SepformerSeparation
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 # =============================================================================
+# Load Environment
+# =============================================================================
+def load_environment():
+    """Load appropriate environment variables based on deployment mode"""
+    env_file = os.getenv('ENV_FILE', '.env.development')
+    load_dotenv(env_file)
+    logging.info(f"Loaded environment from {env_file}")
+    
+    # Return a config dictionary with all needed environment variables
+    return {
+        'api_host': os.getenv('API_HOST', 'http://localhost'),
+        'api_port': int(os.getenv('API_PORT', 8000)),
+        'cors_origins': os.getenv('CORS_ORIGINS', '*').split(','),
+        'model_cache_dir': os.getenv('MODEL_CACHE_DIR', 'models'),
+        'hf_auth_token': os.getenv('HF_AUTH_TOKEN', '')
+    }
+
+env_config = load_environment()
+
+# =============================================================================
 # Data Classes and Utility Functions (Same as your pipeline)
 # =============================================================================
 
@@ -152,7 +172,7 @@ class EnhancedAudioProcessor:
 
     def _initialize_models(self):
         logging.info(f"Initializing models on {self.device}...")
-        cache_dir = "models"  # Set your custom cache directory here
+        cache_dir = env_config['model_cache_dir']  # Set your custom cache directory here
 
         self.separator = SepformerSeparation.from_hparams(
             source="speechbrain/resepformer-wsj02mix",
@@ -601,14 +621,14 @@ class EnhancedAudioProcessor:
 # =============================================================================
 
 app = FastAPI(
-    title="Enhanced Audio Transcription API",
-    description="API to process audio files (MP3/WAV) and return a formatted transcript. The transcript can also be downloaded as a TXT file."
+    title="ClearConverse API",
+    description="Transcription solution mainly powered by Whisper-RESepFormer solution. Supported by PyAnnote's Speaker Diarization, Voice Activity Detection, and Embeddings"
 )
 
 # Allow CORS if needed
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=env_config['cors_origins'],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -620,7 +640,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
 load_dotenv()  # this loads variables from .env into the environment
-AUTH_TOKEN = os.getenv("HF_AUTH_TOKEN")
+AUTH_TOKEN = env_config['hf_auth_token']
 config = Config(auth_token=AUTH_TOKEN)
 processor = EnhancedAudioProcessor(config)
 
@@ -657,4 +677,4 @@ async def download_transcript(file_path: str):
 # =============================================================================
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=env_config['api_port'])
