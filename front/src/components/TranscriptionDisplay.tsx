@@ -17,10 +17,10 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
   const [expanded, setExpanded] = useState(false);
   const [copySuccess, setCopySuccess] = useState<string | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState<string | null>(null);
+  const API_BASE_URL = 'http://localhost:8000';
 
-  // Parse the transcript to highlight speaker segments
+  // Format transcript with speaker highlighting
   const formatTranscript = (text: string) => {
-    // Check if the transcript includes speaker tags like [SPEAKER_X]
     const hasSpeakerTags = /\[SPEAKER_[A-Z]\]/g.test(text);
     
     if (hasSpeakerTags) {
@@ -29,11 +29,13 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
       
       return parts.map((part, index) => {
         if (part.match(/\[SPEAKER_[A-Z]\]/)) {
-          const speaker = part.replace(/[\[\]]/g, '');
+          const speaker = part.replace(/[\\[\]]/g, '');
           // Assign different colors based on speaker
-          const color = speaker === 'SPEAKER_A' ? 'text-blue-400' : 
-                       speaker === 'SPEAKER_B' ? 'text-gray-300' : 
-                       speaker === 'SPEAKER_C' ? 'text-gray-400' : 'text-gray-500';
+          const color = 
+            speaker === 'SPEAKER_A' ? 'text-blue-400' : 
+            speaker === 'SPEAKER_B' ? 'text-gray-300' : 
+            speaker === 'SPEAKER_C' ? 'text-gray-400' : 'text-gray-500';
+            
           return (
             <span key={index} className={`font-semibold ${color}`}>
               {part.replace('SPEAKER_A', 'Speaker A')
@@ -53,6 +55,7 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
     }
   };
 
+  // Copy transcript to clipboard
   const handleCopyToClipboard = () => {
     navigator.clipboard.writeText(transcript).then(
       () => {
@@ -66,17 +69,10 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
     );
   };
 
-  const handleClearConfirm = () => {
-    setShowConfirmDialog('clear');
-  };
-
-  const handleResetConfirm = () => {
-    setShowConfirmDialog('reset');
-  };
-
-  const handleDialogCancel = () => {
-    setShowConfirmDialog(null);
-  };
+  // Handle confirmation dialogs
+  const handleClearConfirm = () => setShowConfirmDialog('clear');
+  const handleResetConfirm = () => setShowConfirmDialog('reset');
+  const handleDialogCancel = () => setShowConfirmDialog(null);
 
   const handleActionConfirmed = () => {
     if (showConfirmDialog === 'clear') {
@@ -88,44 +84,50 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
   };
 
   // Calculate statistics
-  const wordCount = transcript.split(/\s+/).length;
+  const calculateWordCount = (text: string): number => {
+    return text
+      .replace(/[^\w\s]|_/g, '')
+      .split(/\s+/)
+      .filter(Boolean)
+      .length;
+  };
+
+  const wordCount = calculateWordCount(transcript);
   const speakerATurns = (transcript.match(/\[SPEAKER_A\]/g) || []).length;
   const speakerBTurns = (transcript.match(/\[SPEAKER_B\]/g) || []).length;
-  const durationMatch = transcript.match(/(\d+\.\d+)s/);
-  const duration = durationMatch ? parseFloat(durationMatch[1]).toFixed(1) : "N/A";
+  
+  // Extract duration from transcript
+  const extractDuration = (text: string): string => {
+    const formats = [
+      /(\d+\.\d+)s/,
+      /(\d+\.\d+) seconds/,
+      /duration: (\d+\.\d+)/,
+      /(\d+:\d+)/
+    ];
+    
+    for (const regex of formats) {
+      const match = text.match(regex);
+      if (match && match[1]) {
+        if (match[1].includes(':')) {
+          const [minutes, seconds] = match[1].split(':').map(Number);
+          return (minutes * 60 + seconds).toFixed(1);
+        }
+        return parseFloat(match[1]).toFixed(1);
+      }
+    }
+    
+    return "N/A";
+  };
+  
+  const duration = extractDuration(transcript);
 
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 mt-6 shadow-sm">
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-2xl font-bold text-gray-200">Transcription Result</h2>
-        
-        {/* Action buttons */}
-        <div className="flex gap-3">
-          <button
-            onClick={handleClearConfirm}
-            className="flex items-center text-yellow-400 hover:text-yellow-300 transition-colors"
-            title="Clear transcription but keep audio"
-          >
-            <svg className="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-            </svg>
-            Clear
-          </button>
-          
-          <button
-            onClick={handleResetConfirm}
-            className="flex items-center text-red-400 hover:text-red-300 transition-colors"
-            title="Reset everything (audio and transcription)"
-          >
-            <svg className="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-            </svg>
-            Reset All
-          </button>
-        </div>
       </div>
       
-      {/* Confirmation modal for actions */}
+      {/* Confirmation dialog */}
       {showConfirmDialog && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 shadow-lg max-w-md">
@@ -159,10 +161,11 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
         </div>
       )}
       
+      {/* Transcript display */}
       <div 
-        className={`bg-gray-750 p-4 rounded-lg text-gray-300 border border-gray-700 whitespace-pre-wrap overflow-y-auto transition-all duration-300 shadow-inner ${
-          expanded ? 'max-h-[600px]' : 'max-h-80'
-        }`}
+        className={`bg-gray-750 p-4 rounded-lg text-gray-300 border border-gray-700 
+          whitespace-pre-wrap overflow-y-auto transition-all duration-300 
+          ${expanded ? 'max-h-[600px]' : 'max-h-80'}`}
       >
         {formatTranscript(transcript)}
       </div>
@@ -191,9 +194,10 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
         </button>
       )}
       
+      {/* Action buttons */}
       <div className="mt-6 flex flex-wrap gap-3">
         <a
-          href={`http://localhost:8000${downloadUrl}`}
+          href={`${API_BASE_URL}${downloadUrl}`}
           download="transcript.txt"
           className="flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors shadow-sm"
         >
@@ -225,6 +229,7 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
           Reset Everything
         </button>
         
+        {/* Copy to clipboard button */}
         <button
           onClick={handleCopyToClipboard}
           className="flex items-center px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium rounded-lg transition-colors shadow-sm relative"
@@ -244,25 +249,10 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
       
       {/* Stats section */}
       <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-gray-700 p-3 rounded-lg border border-gray-600">
-          <p className="text-xs text-blue-400 font-medium">Word Count</p>
-          <p className="text-2xl font-bold text-gray-200">{wordCount}</p>
-        </div>
-        
-        <div className="bg-gray-700 p-3 rounded-lg border border-gray-600">
-          <p className="text-xs text-blue-400 font-medium">Duration (sec)</p>
-          <p className="text-2xl font-bold text-gray-200">{duration}</p>
-        </div>
-        
-        <div className="bg-gray-700 p-3 rounded-lg border border-gray-600">
-          <p className="text-xs text-blue-400 font-medium">Speaker A Turns</p>
-          <p className="text-2xl font-bold text-gray-200">{speakerATurns || 'N/A'}</p>
-        </div>
-        
-        <div className="bg-gray-700 p-3 rounded-lg border border-gray-600">
-          <p className="text-xs text-blue-400 font-medium">Speaker B Turns</p>
-          <p className="text-2xl font-bold text-gray-200">{speakerBTurns || 'N/A'}</p>
-        </div>
+        <StatBox label="Word Count" value={wordCount.toString()} />
+        <StatBox label="Duration (sec)" value={duration} />
+        <StatBox label="Speaker A Turns" value={speakerATurns ? speakerATurns.toString() : 'N/A'} />
+        <StatBox label="Speaker B Turns" value={speakerBTurns ? speakerBTurns.toString() : 'N/A'} />
       </div>
 
       {/* Additional information */}
@@ -281,5 +271,13 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
     </div>
   );
 };
+
+// Helper component for stat boxes
+const StatBox: React.FC<{label: string, value: string}> = ({label, value}) => (
+  <div className="bg-gray-700 p-3 rounded-lg border border-gray-600">
+    <p className="text-xs text-blue-400 font-medium">{label}</p>
+    <p className="text-2xl font-bold text-gray-200">{value}</p>
+  </div>
+);
 
 export default TranscriptionDisplay;

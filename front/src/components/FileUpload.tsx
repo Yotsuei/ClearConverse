@@ -2,23 +2,19 @@
 import React, { useState } from 'react';
 
 interface FileUploadProps {
-  onFileSelected: (file: File) => void;
-  onUploadResponse: (transcript: string, downloadUrl: string) => void;
+  setTaskId: (taskId: string) => void;
   setIsUploading: (isUploading: boolean) => void;
   setUploadProgress: (progress: number) => void;
-  setIsProcessing: (isProcessing: boolean) => void;
-  startProcessing: () => void;
   clearTranscription: () => void;
+  onUploadSuccess: (previewUrl: string, taskId: string) => void;
 }
 
 const FileUpload: React.FC<FileUploadProps> = ({ 
-  onFileSelected, 
-  onUploadResponse, 
+  setTaskId,
   setIsUploading, 
   setUploadProgress,
-  setIsProcessing,
-  startProcessing,
-  clearTranscription
+  clearTranscription,
+  onUploadSuccess
 }) => {
   const [file, setFile] = useState<File | null>(null);
   const [dragActive, setDragActive] = useState(false);
@@ -36,14 +32,17 @@ const FileUpload: React.FC<FileUploadProps> = ({
     ];
     
     // Secondary formats (may require conversion)
-    const secondaryExtensions = ['.mp4', '.webm', '.ogg'];
+    const secondaryExtensions = ['.mp4', '.webm', '.ogg', '.flac', '.m4a', '.aac'];
     const secondaryMimeTypes = [
       'video/mp4', 
       'audio/mp4',
       'audio/webm',
       'video/webm',
       'audio/ogg',
-      'application/ogg'
+      'application/ogg',
+      'audio/flac',
+      'audio/m4a',
+      'audio/aac'
     ];
     
     // Combine all valid formats
@@ -78,7 +77,6 @@ const FileUpload: React.FC<FileUploadProps> = ({
       
       setFileError(null);
       setFile(selectedFile);
-      onFileSelected(selectedFile);
     }
   };
 
@@ -111,7 +109,6 @@ const FileUpload: React.FC<FileUploadProps> = ({
       
       setFileError(null);
       setFile(droppedFile);
-      onFileSelected(droppedFile);
     }
   };
 
@@ -131,9 +128,6 @@ const FileUpload: React.FC<FileUploadProps> = ({
       alert('Please select a file first.');
       return;
     }
-
-    // Clear any previous transcription when uploading
-    clearTranscription();
     
     setIsUploading(true);
     setUploadProgress(0);
@@ -145,7 +139,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
       const xhr = new XMLHttpRequest();
       setUploadXhr(xhr); // Store XHR reference for cancel functionality
       
-      xhr.open('POST', 'http://localhost:8000/transcribe');
+      xhr.open('POST', 'http://localhost:8000/upload-file');
       
       xhr.upload.addEventListener('progress', (event) => {
         if (event.lengthComputable) {
@@ -158,13 +152,19 @@ const FileUpload: React.FC<FileUploadProps> = ({
         if (xhr.status === 200) {
           setIsUploading(false);
           setUploadXhr(null);
-          startProcessing();
           
-          // Parse response
+          // Parse response to get task_id
           const response = JSON.parse(xhr.responseText);
-          onUploadResponse(response.transcript, response.download_url);
+          
+          if (response.task_id && response.preview_url) {
+            console.log('File uploaded. Task ID:', response.task_id);
+            setTaskId(response.task_id);
+            onUploadSuccess(response.preview_url, response.task_id);
+          } else {
+            throw new Error('No task ID returned from server');
+          }
         } else {
-          throw new Error(`Error: ${xhr.statusText}`);
+          throw new Error(`Error: ${xhr.statusText || 'Server returned an error'}`);
         }
       };
 
@@ -180,7 +180,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
       xhr.send(formData);
     } catch (error) {
       console.error('Upload failed:', error);
-      alert('There was an error uploading your file.');
+      alert(`There was an error uploading your file: ${(error as Error).message}`);
       setIsUploading(false);
       setUploadXhr(null);
     }
@@ -203,7 +203,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
 
   return (
     <div className="flex flex-col items-center">
-      <h2 className="text-xl font-bold text-gray-200 mb-4">Upload Audio File</h2>
+      <h2 className="text-xl font-bold text-gray-200 mb-4">File Upload</h2>
       <p className="text-gray-400 mb-6 text-center">
         Upload your audio or video file for transcription. WAV and MP3 formats are recommended for best results.
       </p>
@@ -220,7 +220,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
         <input
           id="fileInput"
           type="file"
-          accept=".wav,.mp4,.mp3,.webm,.ogg"
+          accept=".wav,.mp4,.mp3,.webm,.ogg,.flac,.m4a,.aac"
           onChange={handleFileChange}
           className="hidden"
         />
@@ -248,32 +248,6 @@ const FileUpload: React.FC<FileUploadProps> = ({
         </div>
       )}
       
-      {file && (
-        <div className="w-full bg-gray-700 rounded-lg p-3 mb-4 flex items-center">
-          <div className="bg-blue-900 rounded-lg p-2 mr-3">
-            <svg className="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path>
-            </svg>
-          </div>
-          <div className="flex-grow truncate">
-            <p className="text-sm font-medium truncate text-gray-200">{file.name}</p>
-            <p className="text-xs text-gray-400">{(file.size / (1024 * 1024)).toFixed(2)} MB</p>
-          </div>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setFile(null);
-              clearTranscription();
-            }}
-            className="ml-2 text-gray-400 hover:text-red-400"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
-            </svg>
-          </button>
-        </div>
-      )}
-      
       {!uploadXhr ? (
         <button
           onClick={handleUpload}
@@ -284,7 +258,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
               : 'bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg'}`
           }
         >
-          Upload & Transcribe
+          Upload Audio
         </button>
       ) : (
         <button
@@ -304,14 +278,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
           </svg>
           Supported File Formats
         </h3>
-        <ul className="list-disc list-inside text-gray-300 space-y-1">
-          <li><span className="font-medium text-green-400">.wav</span> - Waveform Audio Format (recommended)</li>
-          <li><span className="font-medium text-green-400">.mp3</span> - MP3 Audio Format (recommended)</li>
-          <li><span className="font-medium text-gray-400">.mp4</span> - MPEG-4 Video (audio will be extracted)</li>
-          <li><span className="font-medium text-gray-400">.webm</span> - WebM Audio/Video (may require conversion)</li>
-          <li><span className="font-medium text-gray-400">.ogg</span> - Ogg Vorbis Audio (may require conversion)</li>
-        </ul>
-        <p className="mt-2 text-gray-400">For best results, use WAV or MP3 files with clear audio and minimal background noise. Other formats may cause processing errors.</p>
+        <p className="mt-2 text-gray-400">For best results, use WAV or MP3 files with clear audio and minimal background noise.</p>
       </div>
     </div>
   );

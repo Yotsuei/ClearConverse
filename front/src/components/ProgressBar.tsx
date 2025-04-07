@@ -5,49 +5,56 @@ interface ProgressBarProps {
   progress: number;
   type: 'upload' | 'processing';
   onCancel?: () => void;
+  message?: string;
 }
 
-const ProgressBar: React.FC<ProgressBarProps> = ({ progress, type, onCancel }) => {
-  // Determine the stage based on progress percentage and type
-  const getStage = () => {
+const ProgressBar: React.FC<ProgressBarProps> = ({ 
+  progress, 
+  type, 
+  onCancel, 
+  message 
+}) => {
+  // Determine if progress bar should show indeterminate loading animation
+  const isIndeterminate = progress < 10;
+  
+  // Generate default stage message if none provided
+  const getDefaultStageMessage = () => {
     if (type === 'upload') {
       if (progress < 25) return "Starting upload...";
       if (progress < 50) return "Uploading file...";
       if (progress < 75) return "Verifying upload...";
       if (progress < 90) return "Upload complete...";
       return "Preparing for processing...";
-    } else { // processing
-      if (progress < 25) return "Analyzing audio...";
-      if (progress < 50) return "Processing speech...";
-      if (progress < 75) return "Generating transcription...";
-      if (progress < 90) return "Finalizing results...";
+    } else { 
+      if (progress < 10) return "Initializing transcription...";
+      if (progress < 30) return "Building speaker profiles...";
+      if (progress < 50) return "Detecting speech segments...";
+      if (progress < 70) return "Processing overlapping speech...";
+      if (progress < 85) return "Generating transcription...";
+      if (progress < 95) return "Finalizing results...";
       return "Transcription complete!";
     }
   };
 
-  // Get primary and secondary colors based on type
-  const getBgColor = () => {
-    return type === 'upload' ? 'bg-blue-600' : 'bg-blue-500';
-  };
-  
-  const getLightBgColor = () => {
-    return type === 'upload' ? 'bg-blue-900' : 'bg-blue-900';
-  };
-  
-  const getBorderColor = () => {
-    return type === 'upload' ? 'border-blue-800' : 'border-blue-800';
-  };
-  
-  const getTextColor = () => {
-    return type === 'upload' ? 'text-blue-300' : 'text-blue-300';
+  // Get display message from prop or generate default
+  const displayMessage = message || getDefaultStageMessage();
+
+  // Style configuration based on type
+  const styles = {
+    container: `w-full p-4 rounded-lg ${type === 'upload' ? 'bg-blue-900' : 'bg-blue-900'} border ${type === 'upload' ? 'border-blue-800' : 'border-blue-800'} mb-6`,
+    text: `text-sm font-medium ${type === 'upload' ? 'text-blue-300' : 'text-blue-300'}`,
+    progressBar: `absolute top-0 bottom-0 left-0 ${type === 'upload' ? 'bg-blue-600' : 'bg-blue-500'}`,
+    pulseBg: `absolute inset-0 ${type === 'upload' ? 'bg-blue-600' : 'bg-blue-500'} opacity-30`
   };
 
   return (
-    <div className={`w-full p-4 rounded-lg ${getLightBgColor()} border ${getBorderColor()} mb-6`}>
+    <div className={styles.container}>
       <div className="mb-2 flex justify-between items-center">
-        <div className={`text-sm font-medium ${getTextColor()}`}>{getStage()}</div>
+        <div className={styles.text}>{displayMessage}</div>
         <div className="flex items-center gap-3">
-          <div className={`text-sm font-medium ${getTextColor()}`}>{Math.round(progress)}%</div>
+          <div className={styles.text}>
+            {isIndeterminate ? '' : `${Math.round(progress)}%`}
+          </div>
           
           {/* Cancel button */}
           {onCancel && progress < 100 && (
@@ -64,30 +71,46 @@ const ProgressBar: React.FC<ProgressBarProps> = ({ progress, type, onCancel }) =
           )}
         </div>
       </div>
+      
       <div className="relative w-full h-2.5 bg-gray-700 rounded-full overflow-hidden">
-        {/* Background pulse animation when in progress */}
-        <div 
-          className={`absolute inset-0 ${getBgColor()} opacity-30`}
-          style={{ 
-            animation: progress < 100 ? 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite' : 'none',
-          }}
-        />
-        
-        {/* Actual progress bar */}
-        <div 
-          className={`h-full ${getBgColor()} rounded-full transition-all duration-300 ease-out`}
-          style={{ width: `${progress}%` }}
-        />
+        {/* Indeterminate animation for initial loading */}
+        {isIndeterminate ? (
+          <div 
+            className={styles.progressBar}
+            style={{ 
+              width: '30%',
+              animation: 'indeterminate 1.5s infinite ease-in-out',
+            }}
+          />
+        ) : (
+          <>
+            {/* Background pulse animation when in progress */}
+            <div 
+              className={styles.pulseBg}
+              style={{ 
+                animation: progress < 100 ? 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite' : 'none',
+              }}
+            />
+            
+            {/* Actual progress bar */}
+            <div 
+              className={`h-full ${styles.progressBar} rounded-full transition-all duration-300 ease-out`}
+              style={{ width: `${progress}%` }}
+            />
+          </>
+        )}
       </div>
       
+      {/* CSS Animations */}
       <style jsx>{`
         @keyframes pulse {
-          0%, 100% {
-            opacity: 0.3;
-          }
-          50% {
-            opacity: 0.6;
-          }
+          0%, 100% { opacity: 0.3; }
+          50% { opacity: 0.6; }
+        }
+        
+        @keyframes indeterminate {
+          0% { left: -30%; }
+          100% { left: 100%; }
         }
       `}</style>
     </div>
