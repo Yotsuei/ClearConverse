@@ -5,30 +5,34 @@ import logging
 import traceback
 import uuid
 import asyncio
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass, field
+
+# FastAPI imports
 from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, BackgroundTasks, Form
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pathlib import Path
 import uvicorn
-from dotenv import load_dotenv
 from datetime import datetime, timedelta
+
+# Environment and scheduling
+from dotenv import load_dotenv
 from apscheduler.schedulers.background import BackgroundScheduler
 
-# Import necessary libraries for audio processing
+# Audio processing libs
 import torch
 import torchaudio
 import whisper
 import noisereduce as nr
 import numpy as np
 from collections import Counter, defaultdict
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
 
 # External libraries for diarization, separation and VAD
 from pyannote.audio import Pipeline, Inference
 from speechbrain.inference import SepformerSeparation
 
-# Add these imports for URL handling
+# URL handling
 import requests
 import tempfile
 import platform
@@ -36,16 +40,11 @@ import subprocess
 from urllib.parse import urlparse
 import validators
 import re
-from fastapi.responses import FileResponse
 
 # =============================================================================
-# Logging setup
+# Logging and Configuration
 # =============================================================================
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-
-# =============================================================================
-# Data Classes and Utility Functions
-# =============================================================================
 
 @dataclass
 class AudioSegment:
@@ -62,22 +61,15 @@ class AudioSegment:
 class Config:
     auth_token: str
     target_sample_rate: int = 16000
-    # Increase minimum segment duration to ensure segments are long enough for reliable embedding extraction.
     min_segment_duration: float = 0.75  
-    # Slightly higher threshold to detect overlaps (adjust based on audio characteristics).
     overlap_threshold: float = 0.65  
     condition_on_previous_text: bool = True
-    # Tighten gap threshold to avoid merging distinct speaker turns.
     merge_gap_threshold: float = 0.5  
-    # Increase the minimum duration for overlap separation.
     min_overlap_duration_for_separation: float = 0.6  
-    # Use more segments for a more robust speaker embedding average.
     max_embedding_segments: int = 100  
     enhance_separated_audio: bool = True
     use_vad_refinement: bool = True
-    # Adjust the speaker embedding threshold if needed for more sensitive matching.
     speaker_embedding_threshold: float = 0.45  
-    # Increase noise reduction to help cleaner input for diarization and embedding.
     noise_reduction_amount: float = 0.65  
     transcription_batch_size: int = 8
     use_speaker_embeddings: bool = True
@@ -86,12 +78,13 @@ class Config:
     min_speakers: int = 1
     whisper_model_size: str = "small.en"
     transcribe_overlaps_individually: bool = True
-    # Increase window size for overlap segmentation to capture more context.
     sliding_window_size: float = 1.0  
-    # Use a finer step to get smoother segmentation in overlaps.
     sliding_window_step: float = 0.5  
-    # Increase the secondary diarization threshold to catch more misclassifications.
     secondary_diarization_threshold: float = 0.35
+
+# =============================================================================
+# Utility Functions 
+# =============================================================================
 
 def merge_diarization_segments(segments: List[Tuple[float, float, str]], gap_threshold: float) -> List[Tuple[float, float, str]]:
     if not segments:
@@ -153,7 +146,10 @@ def enhance_audio(audio: torch.Tensor, sample_rate: int, stationary: bool = True
         audio_np = audio_np / np.max(np.abs(audio_np))
     return torch.tensor(audio_np, dtype=torch.float32)
 
-# URL handling utility functions
+# =============================================================================
+# URL Handling Utilities
+# =============================================================================
+
 def is_ffmpeg_installed():
     """Check if ffmpeg is installed and available in PATH."""
     try:
@@ -169,19 +165,15 @@ def is_ffmpeg_installed():
         return False
         
 def download_file_from_url(url, output_path=None):
-    """
-    Download a file from a URL and save it to a temporary file if output_path is not provided.
-    Returns the path to the downloaded file.
-    """
+    """Download a file from a URL and save it to a temporary file if output_path is not provided."""
     try:
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
         
         response = requests.get(url, headers=headers, stream=True, timeout=30)
-        response.raise_for_status()  # Raise an exception for HTTP errors
+        response.raise_for_status()
         
-        # Determine content type from headers
         content_type = response.headers.get('Content-Type', '')
         
         if not output_path:
@@ -240,7 +232,7 @@ def validate_url(url):
         # Check if response indicates success (status code 2xx)
         if not response.ok:
             raise HTTPException(status_code=400, 
-                               detail=f"URL returned status code {response.status_code}. Make sure the URL is publicly accessible.")
+                              detail=f"URL returned status code {response.status_code}. Make sure the URL is publicly accessible.")
         
         # Check if content type suggests audio or video
         content_type = response.headers.get('Content-Type', '').lower()
@@ -257,7 +249,6 @@ def validate_url(url):
         
         if not is_valid_content:
             logging.warning(f"URL may not point to audio/video content: {content_type}")
-            # Just log a warning, don't raise an exception, as content-type might be misleading
     
     except requests.exceptions.Timeout:
         raise HTTPException(status_code=400, detail="URL request timed out. Server might be slow or unreachable.")
@@ -268,8 +259,25 @@ def validate_url(url):
     
     return True
 
+def convert_google_drive_url(drive_url: str) -> str:
+    """Convert a Google Drive sharing URL into a direct download URL."""
+    # Pattern for /file/d/FILE_ID/view
+    file_match = re.search(r'/file/d/([^/]+)', drive_url)
+    if file_match:
+        file_id = file_match.group(1)
+        return f"https://drive.google.com/uc?export=download&id={file_id}"
+    
+    # Pattern for open?id=FILE_ID
+    open_match = re.search(r'[?&]id=([^&]+)', drive_url)
+    if open_match:
+        file_id = open_match.group(1)
+        return f"https://drive.google.com/uc?export=download&id={file_id}"
+    
+    # Conversion failed
+    return ""
+
 # =============================================================================
-# EnhancedAudioProcessor Class 
+# Enhanced Audio Processor Class
 # =============================================================================
 
 class EnhancedAudioProcessor:
@@ -330,11 +338,9 @@ class EnhancedAudioProcessor:
 
     def _extract_segment(self, audio: torch.Tensor, start: float, end: float, sample_rate: Optional[int] = None) -> torch.Tensor:
         sr = sample_rate or self.config.target_sample_rate
-        # Log the raw times for debugging
         audio_duration = audio.shape[-1] / sr
         logging.debug(f"Extracting segment: start={start:.2f}s, end={end:.2f}s, audio duration={audio_duration:.2f}s")
         
-        # Ensure start and end are within audio duration bounds
         if start < 0:
             logging.warning(f"Start time {start:.2f}s is negative; setting to 0.")
             start = 0.0
@@ -345,11 +351,9 @@ class EnhancedAudioProcessor:
         start_idx = int(start * sr)
         end_idx = int(end * sr)
         
-        # Additional check: if indices are invalid, log detailed info and return a small non-empty tensor
         if start_idx >= end_idx:
             logging.warning(f"Invalid segment indices: {start_idx}-{end_idx} for audio length {audio.shape[-1]} "
                             f"(start_time={start:.2f}s, end_time={end:.2f}s, sample_rate={sr}).")
-            # Return a small tensor of zeros (or consider skipping the segment)
             return torch.zeros((1, 100), device=self.device)
         
         return audio[:, start_idx:end_idx]
@@ -499,21 +503,30 @@ class EnhancedAudioProcessor:
             audio, sample_rate = self.load_audio(file_path)
             audio_duration = audio.shape[-1] / sample_rate
             logging.info(f"Processing audio file: {audio_duration:.2f} seconds")
+            
+            # Run Voice Activity Detection
             logging.info("Running Voice Activity Detection...")
             vad_result = self.vad_pipeline(file_path)
             vad_intervals = get_pyannote_vad_intervals(vad_result)
             logging.info(f"VAD detected {len(vad_intervals)} speech intervals")
-            logging.info("Running full-audio Speaker Diarization for profile building...")
+            
+            # Run Speaker Diarization
+            logging.info("Running Speaker Diarization...")
             diarization_result = self.diarization(
                 file_path,
                 min_speakers=self.config.min_speakers,
                 max_speakers=self.config.max_speakers
             )
+            
+            # Process and merge segments
             raw_segments = [(segment.start, segment.end, speaker)
                             for segment, _, speaker in diarization_result.itertracks(yield_label=True)]
             logging.info(f"Diarization found {len(raw_segments)} raw segments")
+            
             merged_segments = merge_diarization_segments(raw_segments, self.config.merge_gap_threshold)
             logging.info(f"After merging: {len(merged_segments)} segments")
+            
+            # Refine segments with VAD if enabled
             refined_segments = []
             if self.config.use_vad_refinement:
                 for start, end, speaker in merged_segments:
@@ -523,8 +536,12 @@ class EnhancedAudioProcessor:
                 logging.info(f"After VAD refinement: {len(refined_segments)} segments")
             else:
                 refined_segments = merged_segments
+            
+            # Build speaker profiles
             speaker_embeddings = self._build_speaker_profiles(audio, diarization_result)
             logging.info(f"Created embeddings for {len(speaker_embeddings)} speakers")
+            
+            # Map speaker IDs to friendly names
             speaker_counts = Counter(speaker for _, _, speaker in refined_segments)
             if len(speaker_counts) < 2:
                 logging.warning("Not enough speakers detected, using default mapping")
@@ -536,10 +553,20 @@ class EnhancedAudioProcessor:
                 common_speakers = [spk for spk, _ in speaker_counts.most_common(2)]
                 speaker_mapping = {common_speakers[0]: "SPEAKER_A", common_speakers[1]: "SPEAKER_B"}
             logging.info(f"Using speaker mapping: {speaker_mapping}")
+            
+            # Detect overlap regions
             overlap_regions = self._detect_overlap_regions(diarization_result)
+            
+            # Process each segment
             processed_segments = []
             meta_counts = {'SPEAKER_A': 0, 'SPEAKER_B': 0}
+            
             for seg_start, seg_end, orig_speaker in refined_segments:
+                # Skip segments that are too short
+                if (seg_end - seg_start) < self.config.min_segment_duration:
+                    continue
+                
+                # Check if segment contains overlap
                 is_overlap = False
                 involved_speakers = []
                 for ov_start, ov_end, speakers in overlap_regions:
@@ -547,18 +574,23 @@ class EnhancedAudioProcessor:
                         is_overlap = True
                         involved_speakers = speakers
                         break
-                if (seg_end - seg_start) < self.config.min_segment_duration:
-                    continue
+                
                 audio_segment = self._extract_segment(audio, seg_start, seg_end)
                 spk_label = speaker_mapping.get(orig_speaker, "UNKNOWN")
+                
+                # Process non-overlapping segments
                 if not is_overlap:
                     embedding = self._extract_embedding(audio_segment)
+                    
+                    # Check embedding similarity and potentially re-analyze segment
                     if embedding is not None:
                         profile = speaker_embeddings.get(orig_speaker)
                         similarity = self._calculate_embedding_similarity(embedding, profile) if profile is not None else 0
+                        
                         if similarity < self.config.secondary_diarization_threshold:
                             logging.info(f"Segment {seg_start:.2f}-{seg_end:.2f}s has low similarity ({similarity:.2f}); re-running secondary diarization.")
                             new_segments = self._secondary_diarization(audio_segment, seg_start, seg_end)
+                            
                             for new_start, new_end, new_spk in new_segments:
                                 sub_audio = self._extract_segment(audio_segment, new_start - seg_start, new_end - seg_start)
                                 transcription = self.whisper_model.transcribe(
@@ -580,6 +612,8 @@ class EnhancedAudioProcessor:
                                 ))
                                 meta_counts[final_label] = meta_counts.get(final_label, 0) + 1
                             continue
+                
+                # Process overlapping segments with special handling
                 if is_overlap:
                     mapped_profiles = {speaker_mapping.get(k, k): v for k, v in speaker_embeddings.items()}
                     refined_results = self._process_overlap_segment(
@@ -602,6 +636,7 @@ class EnhancedAudioProcessor:
                             metadata={'overlap_speakers': involved_speakers}
                         ))
                 else:
+                    # Standard segment processing
                     transcription = self.whisper_model.transcribe(
                         audio_segment.squeeze().cpu().numpy(),
                         initial_prompt="This is a conversation between two people.",
@@ -619,7 +654,11 @@ class EnhancedAudioProcessor:
                         confidence=1.0
                     ))
                     meta_counts[spk_label] += 1
+            
+            # Sort segments by start time
             processed_segments.sort(key=lambda x: x.start)
+            
+            # Build metadata for the result
             metadata = {
                 'duration': audio_duration,
                 'speaker_a_segments': meta_counts.get('SPEAKER_A', 0),
@@ -627,6 +666,7 @@ class EnhancedAudioProcessor:
                 'total_segments': len(processed_segments),
                 'speakers': list(speaker_mapping.values())
             }
+            
             return {'segments': processed_segments, 'metadata': metadata}
         except Exception as e:
             logging.error(f"Error in process_file: {e}")
@@ -639,6 +679,7 @@ class EnhancedAudioProcessor:
         overlap_dir = output_dir / "overlap_segments"
         regular_dir.mkdir(parents=True, exist_ok=True)
         overlap_dir.mkdir(parents=True, exist_ok=True)
+        
         for segment in segments:
             timestamp = f"{segment.start:.2f}-{segment.end:.2f}"
             if segment.is_overlap:
@@ -647,6 +688,7 @@ class EnhancedAudioProcessor:
             else:
                 filename = f"{timestamp}_{segment.speaker_id}.wav"
                 save_path = regular_dir / filename
+            
             torchaudio.save(str(save_path), segment.audio_tensor.cpu(), self.config.target_sample_rate)
             logging.info(f"Saved segment: {save_path}")
 
@@ -654,13 +696,16 @@ class EnhancedAudioProcessor:
         debug_dir = Path(output_dir) / "debug_segments"
         debug_dir.mkdir(parents=True, exist_ok=True)
         metadata = []
+        
         for idx, segment in enumerate(segments):
             segment_id = f"segment_{idx:03d}"
             segment_type = "overlap" if segment.is_overlap else "regular"
             segment_dir = debug_dir / segment_type
             segment_dir.mkdir(exist_ok=True)
+            
             audio_filename = f"{segment_id}.wav"
             torchaudio.save(str(segment_dir / audio_filename), segment.audio_tensor.cpu(), self.config.target_sample_rate)
+            
             segment_metadata = {
                 "segment_id": segment_id,
                 "start_time": f"{segment.start:.3f}",
@@ -677,14 +722,17 @@ class EnhancedAudioProcessor:
                 }
             }
             metadata.append(segment_metadata)
+            
             with open(segment_dir / f"{segment_id}_info.txt", "w") as f:
                 f.write(f"Segment ID: {segment_id}\n")
                 f.write(f"Time: {segment.start:.3f}s - {segment.end:.3f}s\n")
                 f.write(f"Speaker: {segment.speaker_id}\n")
                 f.write(f"Overlap: {segment.is_overlap}\n")
                 f.write(f"Transcription: {segment.transcription}\n")
+        
         with open(debug_dir / "segments_metadata.json", "w") as f:
             json.dump(metadata, f, indent=2)
+            
         logging.info(f"Debug segments saved to: {debug_dir}")
         logging.info(f"Total segments: {len(segments)}")
         logging.info(f"Overlap segments: {sum(1 for s in segments if s.is_overlap)}")
@@ -694,44 +742,57 @@ class EnhancedAudioProcessor:
         try:
             if progress_callback:
                 progress_callback(5, "Starting processing")
-            # In temporary mode, use the provided output_dir (which should be task-specific)
+                
+            # Create output directory
             os.makedirs(output_dir, exist_ok=True)
             logging.info(f"Processing file: {input_file}")
             
             if progress_callback:
                 progress_callback(30, "Running file processing")
+                
+            # Process the audio file
             results = self.process_file(input_file)
             
             if progress_callback:
                 progress_callback(60, "Saving processed segments")
+                
+            # Save the processed segments
             self.save_segments(results['segments'], output_dir)
+            
             if debug_mode:
                 self.save_debug_segments(results['segments'], output_dir)
+                
             if progress_callback:
                 progress_callback(80, "Saving transcript")
+                
+            # Generate and save transcript
             transcript_path = os.path.join(output_dir, "transcript.txt")
             transcript = ""
             for segment in results['segments']:
                 transcript += f"[{segment.speaker_id}] {segment.start:.2f}s - {segment.end:.2f}s\n"
                 transcript += f"{segment.transcription}\n\n"
+                
             with open(transcript_path, "w", encoding='utf-8') as f:
                 f.write(transcript)
+                
             logging.info(f"Transcript saved to: {transcript_path}")
+            
             if progress_callback:
                 progress_callback(100, "Processing completed")
+                
             return input_file, transcript, transcript_path
         except Exception as e:
             logging.error(f"Error during processing: {e}")
             traceback.print_exc()
             raise
-        
+
 # =============================================================================
-# FastAPI App and Endpoints
+# FastAPI App Configuration
 # =============================================================================
 
 app = FastAPI(
     title="Enhanced Audio Transcription API",
-    description="API to process audio files (MP3/WAV) and return a formatted transcript. The transcript can also be downloaded as a TXT file."
+    description="API to process audio files (MP3/WAV) and return a formatted transcript."
 )
 
 app.add_middleware(
@@ -742,111 +803,107 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global output directory – but each task will have its own subfolder.
+# Global directory setup
 OUTPUT_DIR = "processed_audio"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 temp_uploads = Path("temp_uploads")
 temp_uploads.mkdir(exist_ok=True)
 
+# Load configuration
 load_dotenv()
 AUTH_TOKEN = os.getenv("HF_AUTH_TOKEN")
 config = Config(auth_token=AUTH_TOKEN)
 processor = EnhancedAudioProcessor(config)
 
+# State storage
 uploaded_files = {}
+progress_store = {}
+result_store = {}
 
-# Global dictionaries to track progress and results
-progress_store: Dict[str, Dict] = {}
-result_store: Dict[str, Dict] = {}
-
-def convert_google_drive_url(drive_url: str) -> str:
-    """
-    Convert a Google Drive sharing URL into a direct download URL.
-    Supports URLs in formats like:
-      - https://drive.google.com/file/d/FILE_ID/view
-      - https://drive.google.com/open?id=FILE_ID
-    Returns an empty string if conversion fails.
-    """
-    # Pattern for /file/d/FILE_ID/view
-    file_match = re.search(r'/file/d/([^/]+)', drive_url)
-    if file_match:
-        file_id = file_match.group(1)
-        return f"https://drive.google.com/uc?export=download&id={file_id}"
-    
-    # Pattern for open?id=FILE_ID
-    open_match = re.search(r'[?&]id=([^&]+)', drive_url)
-    if open_match:
-        file_id = open_match.group(1)
-        return f"https://drive.google.com/uc?export=download&id={file_id}"
-    
-    # Conversion failed
-    return ""
+# =============================================================================
+# Helper Functions for Endpoints
+# =============================================================================
 
 def update_progress(task_id: str, percent: int, message: str):
+    """Update and log progress for a given task"""
     progress_store[task_id] = {"progress": percent, "message": message}
     logging.info(f"Task {task_id}: {percent}% - {message}")
 
 async def process_audio_with_progress(task_id: str, file_path: str):
+    """Process audio file with progress updates"""
     try:
         task_output_dir = os.path.join(OUTPUT_DIR, task_id)
         os.makedirs(task_output_dir, exist_ok=True)
+        
+        # Run the processing with progress callback
         input_file, transcript, transcript_path = processor.run(
             file_path, 
             output_dir=task_output_dir, 
             debug_mode=False, 
             progress_callback=lambda p, m: update_progress(task_id, 30 + int(p * 0.7), m)
         )
+        
+        # Store the result
         result_store[task_id] = {"download_url": f"/download/{task_id}/transcript.txt"}
         update_progress(task_id, 100, "Transcription complete")
     except Exception as e:
+        # Handle errors
         update_progress(task_id, 100, f"Error: {str(e)}")
         result_store[task_id] = {"error": str(e)}
         logging.error(f"Error processing audio: {e}")
         traceback.print_exc()
 
-# Instantiate processor
-config = Config(auth_token=AUTH_TOKEN)
-processor = EnhancedAudioProcessor(config)
+# =============================================================================
+# API Endpoints
+# =============================================================================
 
-# -----------------------------------------------------------------------------
-# Endpoint: File Upload
-# -----------------------------------------------------------------------------
 @app.post("/upload-file")
 async def upload_file(file: UploadFile = File(...)):
+    """Endpoint to upload an audio file for processing"""
     if not file.filename.endswith((".mp3", ".wav", ".ogg", ".mp4", ".flac", ".m4a", ".aac")):
         raise HTTPException(status_code=400, detail="Invalid file type provided.")
+        
+    # Generate a task ID and save the file
     task_id = str(uuid.uuid4())
-    # Save file with a filename starting with the task_id.
     extension = os.path.splitext(file.filename)[1]
     filename = f"{task_id}{extension}"
     file_path = temp_uploads / filename
+    
     with open(file_path, "wb") as f:
         content = await file.read()
         f.write(content)
-    # Save mapping
+        
+    # Store the file path for later processing
     uploaded_files[task_id] = str(file_path)
     update_progress(task_id, 0, "File uploaded and saved")
+    
     return JSONResponse(content={"task_id": task_id, "preview_url": f"/preview/{filename}"})
 
-# -----------------------------------------------------------------------------
-# Endpoint: URL Upload
-# -----------------------------------------------------------------------------
 @app.post("/upload-url")
 async def upload_url(url: str = Form(...)):
+    """Endpoint to process an audio file from a URL"""
     validate_url(url)
+    
+    # Handle Google Drive URLs
     if 'drive.google.com' in url:
         converted_url = convert_google_drive_url(url)
         if converted_url:
             url = converted_url
         else:
             raise HTTPException(status_code=400, detail="Invalid Google Drive URL format.")
+    
+    # Generate task ID and prepare for download
     task_id = str(uuid.uuid4())
     parsed_url = urlparse(url)
     extension = os.path.splitext(parsed_url.path)[1]
+    
     if extension.lower() not in ['.mp3', '.wav', '.ogg', '.mp4', '.flac', '.m4a', '.aac']:
-        extension = ".mp3"
+        extension = ".mp3"  # Default to mp3 if extension is unknown
+        
     filename = f"{task_id}{extension}"
     file_path = temp_uploads / filename
+    
+    # Download the file from the URL
     update_progress(task_id, 5, "Downloading audio from URL")
     try:
         with requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, stream=True, timeout=30) as r:
@@ -859,77 +916,77 @@ async def upload_url(url: str = Form(...)):
     except Exception as e:
         logging.error(f"Error downloading file from URL {url}: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Failed to download file: {str(e)}")
+        
+    # Store the file path for later processing
     uploaded_files[task_id] = str(file_path)
+    
     return JSONResponse(content={
-            "task_id": task_id,
-            "preview_url": f"/preview/{filename}"  # Make sure this matches the actual endpoint
-        })
+        "task_id": task_id,
+        "preview_url": f"/preview/{filename}" 
+    })
 
-# -----------------------------------------------------------------------------
-# Endpoint: Transcription (Using Task ID)
-# -----------------------------------------------------------------------------
 @app.post("/transcribe/{task_id}")
 async def transcribe_task(task_id: str, background_tasks: BackgroundTasks):
+    """Start transcription process for a previously uploaded file"""
     if task_id not in uploaded_files:
         raise HTTPException(status_code=404, detail="Task ID not found. Please upload a file or URL first.")
+        
     file_path = uploaded_files[task_id]
     update_progress(task_id, 0, "Task queued for transcription")
+    
+    # Process audio in background
     background_tasks.add_task(process_audio_with_progress, task_id, file_path)
+    
     return JSONResponse(content={"task_id": task_id})
 
-# -----------------------------------------------------------------------------
-# Endpoint: Audio Preview
-# -----------------------------------------------------------------------------
 @app.get("/preview/{filename}")
 async def preview_audio(filename: str):
+    """Serve uploaded audio file for preview"""
     file_path = temp_uploads / filename
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
+        
     return FileResponse(str(file_path), media_type="audio/mpeg", filename=filename)
 
-# -----------------------------------------------------------------------------
-# Endpoint: Get Transcription
-# -----------------------------------------------------------------------------
 @app.get("/transcription/{task_id}")
 async def get_transcription(task_id: str):
-    # Construct the path to the transcript file based on the task ID
+    """Get the transcription text for a completed task"""
     transcript_file = Path(OUTPUT_DIR) / task_id / "transcript.txt"
     
-    # If the file doesn't exist, return a 404 error
     if not transcript_file.exists():
         raise HTTPException(status_code=404, detail="Transcription not found")
     
-    # Read the transcription content
     with open(transcript_file, "r", encoding="utf-8") as f:
         transcript = f.read()
     
-    # Return the task ID and transcription as JSON
     return JSONResponse(content={"task_id": task_id, "transcription": transcript})
 
-# -----------------------------------------------------------------------------
-# Endpoint: Check Task Result
-# -----------------------------------------------------------------------------
 @app.get("/task/{task_id}/result")
 async def get_task_result(task_id: str):
+    """Check the result status of a task"""
     if task_id not in result_store:
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+        
     return JSONResponse(content=result_store[task_id])
 
-# -----------------------------------------------------------------------------
-# Endpoint: WebSocket for Progress Updates
-# -----------------------------------------------------------------------------
 @app.websocket("/ws/progress/{task_id}")
 async def progress_ws(websocket: WebSocket, task_id: str):
+    """WebSocket endpoint for real-time progress updates"""
     await websocket.accept()
     try:
         while True:
             # Initial connection acknowledgement
             await websocket.send_json({"status": "connected"})
+            
+            # Send current progress
             data = progress_store.get(task_id, {"progress": 0, "message": "Initializing..."})
             await websocket.send_json(data)
+            
+            # Exit loop if process is complete
             if data.get("progress", 0) >= 100:
                 break
-            await asyncio.sleep(0.5)  # Frequent updates
+                
+            await asyncio.sleep(0.5)  # Update frequency
     except Exception as e:
         logging.error(f"WebSocket error for task {task_id}: {e}")
     finally:
@@ -938,27 +995,27 @@ async def progress_ws(websocket: WebSocket, task_id: str):
         except RuntimeError as e:
             logging.info(f"WebSocket for task {task_id} already closed: {e}")
 
-# -----------------------------------------------------------------------------
-# Endpoint: Download Transcript
-# -----------------------------------------------------------------------------
 @app.get("/download/{file_path:path}")
 async def download_transcript(file_path: str):
+    """Download the transcript file"""
     transcript_path = Path(OUTPUT_DIR) / file_path
     if not transcript_path.exists():
         raise HTTPException(status_code=404, detail="Transcript file not found.")
+        
     return FileResponse(path=str(transcript_path), media_type="text/plain", filename=transcript_path.name)
 
-# -----------------------------------------------------------------------------
-# Endpoint: Cleanup Task Files
-# -----------------------------------------------------------------------------
 @app.delete("/cleanup/{task_id}")
 async def cleanup(task_id: str):
+    """Clean up temporary files for a task"""
+    # Remove processed folder
     task_processed_folder = Path(OUTPUT_DIR) / task_id
     if task_processed_folder.exists() and task_processed_folder.is_dir():
         shutil.rmtree(task_processed_folder)
         logging.info(f"Cleared processed audio folder for task {task_id}")
     else:
         logging.info(f"No processed audio folder found for task {task_id}")
+    
+    # Remove temporary upload files
     files_removed = 0
     for temp_file in temp_uploads.iterdir():
         if temp_file.name.startswith(task_id):
@@ -968,10 +1025,15 @@ async def cleanup(task_id: str):
                 logging.info(f"Removed temp file: {temp_file}")
             except Exception as e:
                 logging.error(f"Failed to remove temp file {temp_file}: {e}")
+                
     if files_removed == 0:
         logging.info(f"No temp files found for task {task_id}")
+        
     return JSONResponse(content={"status": f"Cleaned up files for task {task_id}"})
+
+# =============================================================================
+# Main Entry Point
+# =============================================================================
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
-

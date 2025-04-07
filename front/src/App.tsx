@@ -1,4 +1,4 @@
-// App.tsx - Updated Progress Handling
+// App.tsx - Cleaned version
 import React, { useState, useRef, useEffect } from 'react';
 import FileUpload from './components/FileUpload';
 import UrlUpload from './components/UrlUpload';
@@ -11,13 +11,18 @@ import ClearButton from './components/ClearButton';
 import WebSocketProgressHandler from './components/WebSocketProgressHandler';
 import './index.css';
 
+// Type definitions
 type AudioSource = {
   previewUrl: string | null;
 };
 
 type Module = 'upload' | 'url';
 
+// API configuration
+const API_BASE_URL = 'http://localhost:8000';
+
 const App: React.FC = () => {
+  // State management
   const [showMainMenu, setShowMainMenu] = useState<boolean>(true);
   const [activeModule, setActiveModule] = useState<Module>('upload');
   const [audioSource, setAudioSource] = useState<AudioSource>({ previewUrl: null });
@@ -32,20 +37,19 @@ const App: React.FC = () => {
   const [isWsConnected, setIsWsConnected] = useState(false);
   const [connectionAttempts, setConnectionAttempts] = useState(0);
   
-  // Add XHR reference to allow cancellation of in-progress requests
+  // References
   const xhrRef = useRef<XMLHttpRequest | null>(null);
 
-  // Effect to fetch transcription once processing is complete
+  // Fetch transcription when processing is complete
   useEffect(() => {
     if (processingProgress === 100 && taskId) {
       fetchTranscription(taskId);
     }
   }, [processingProgress, taskId]);
 
-  // Effect to handle websocket connection failures
+  // Fallback to polling if WebSocket fails
   useEffect(() => {
     if (connectionAttempts > 0 && !isWsConnected && isProcessing) {
-      // Poll for progress as a fallback if WebSocket fails
       const pollInterval = setInterval(() => {
         if (taskId) {
           pollTaskProgress(taskId);
@@ -56,13 +60,13 @@ const App: React.FC = () => {
     }
   }, [connectionAttempts, isWsConnected, isProcessing, taskId]);
 
+  // Function to poll task progress as fallback
   const pollTaskProgress = async (taskId: string) => {
     try {
-      const response = await fetch(`http://localhost:8000/task/${taskId}/result`);
+      const response = await fetch(`${API_BASE_URL}/task/${taskId}/result`);
       if (response.ok) {
         const data = await response.json();
         
-        // If we have a download URL, processing is complete
         if (data.download_url) {
           setProcessingProgress(100);
           setProcessingMessage("Processing complete!");
@@ -75,9 +79,10 @@ const App: React.FC = () => {
     }
   };
 
+  // Fetch the transcription text
   const fetchTranscription = async (taskId: string) => {
     try {
-      const response = await fetch(`http://localhost:8000/transcription/${taskId}`);
+      const response = await fetch(`${API_BASE_URL}/transcription/${taskId}`);
       
       if (!response.ok) {
         throw new Error(`Failed to fetch transcription: ${response.status} ${response.statusText}`);
@@ -99,6 +104,7 @@ const App: React.FC = () => {
     }
   };
 
+  // WebSocket progress handling
   const handleProgressUpdate = (progress: number, message: string) => {
     if (progress > 0) {
       setIsWsConnected(true);
@@ -111,11 +117,10 @@ const App: React.FC = () => {
     
     setProcessingMessage(message);
     
-    // If progress complete, mark as connected and notify
     if (progress === 100) {
       setIsWsConnected(true);
     }
-  }; 
+  };
 
   const handleProcessingComplete = (downloadUrl: string) => {
     if (downloadUrl) {
@@ -131,17 +136,17 @@ const App: React.FC = () => {
     }
   };
 
-  // Modified to handle backend preview URL
+  // Handle successful file/URL upload
   const handleUploadSuccess = (previewUrl: string, newTaskId: string) => {
-    setAudioSource({ previewUrl: `http://localhost:8000${previewUrl}` });
+    setAudioSource({ previewUrl: `${API_BASE_URL}${previewUrl}` });
     setTaskId(newTaskId);
     setIsUploading(false);
   };
 
+  // Reset all state
   const resetState = () => {
     cancelTranscription();
     
-    // Reset all states
     setAudioSource({ previewUrl: null });
     setTranscript(null);
     setDownloadUrl(null);
@@ -155,6 +160,7 @@ const App: React.FC = () => {
     setConnectionAttempts(0);
   };
   
+  // Clear just the transcription
   const clearTranscription = () => {
     setTranscript(null);
     setDownloadUrl(null);
@@ -162,21 +168,25 @@ const App: React.FC = () => {
     setProcessingProgress(0);
   };
   
+  // Reset everything
   const clearAll = () => {
     resetState();
   };
   
+  // Select a module from the main menu
   const handleModuleSelect = (module: Module) => {
     setActiveModule(module);
     setShowMainMenu(false);
     resetState();
   };
   
+  // Return to main menu
   const goToMainMenu = () => {
     resetState();
     setShowMainMenu(true);
   };
 
+  // Cancel ongoing transcription
   const cancelTranscription = () => {
     if (xhrRef.current) {
       xhrRef.current.abort();
@@ -189,7 +199,7 @@ const App: React.FC = () => {
     setProcessingProgress(0);
 
     if (taskId) {
-      fetch(`http://localhost:8000/cleanup/${taskId}`, { method: 'DELETE' })
+      fetch(`${API_BASE_URL}/cleanup/${taskId}`, { method: 'DELETE' })
         .then(response => {
           if (!response.ok) {
             console.error('Failed to cleanup task on server');
@@ -201,6 +211,7 @@ const App: React.FC = () => {
     }
   };
 
+  // Start the transcription process
   const startTranscription = async () => {
     if (!taskId) {
       alert('No task ID available. Please upload a file or URL first.');
@@ -208,13 +219,13 @@ const App: React.FC = () => {
     }
     
     setIsProcessing(true);
-    setProcessingProgress(5); // Start with a small progress indication
+    setProcessingProgress(5);
     setProcessingMessage('Starting transcription...');
     setIsWsConnected(false);
     setConnectionAttempts(0);
 
     try {
-      const response = await fetch(`http://localhost:8000/transcribe/${taskId}`, {
+      const response = await fetch(`${API_BASE_URL}/transcribe/${taskId}`, {
         method: 'POST'
       });
       
@@ -225,7 +236,6 @@ const App: React.FC = () => {
       const data = await response.json();
       console.log('Transcription started:', data);
       
-      // Update UI to show the transcription has started
       setProcessingMessage('Processing in progress...');
     } catch (error) {
       console.error('Error starting transcription:', error);
@@ -234,6 +244,7 @@ const App: React.FC = () => {
     }
   };
 
+  // Handle transcription button click
   const handleTranscribe = () => {
     if (!taskId) {
       alert('Please upload a file or URL first.');
@@ -243,70 +254,79 @@ const App: React.FC = () => {
     startTranscription();
   };
 
+  // Render the active module content
   const renderModuleContent = () => {
     if (activeModule === 'upload') {
-      return (
-        <>
-          {!audioSource.previewUrl ? (
-            <div className="bg-gray-750 rounded-lg p-6 mb-6 border border-gray-700">
-              <FileUpload 
-                setTaskId={setTaskId}
-                setIsUploading={setIsUploading}
-                setUploadProgress={setUploadProgress}
-                clearTranscription={clearTranscription}
-                onUploadSuccess={handleUploadSuccess}
-              />
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <AudioPlayer audioUrl={audioSource.previewUrl} />
-              {taskId && !transcript && (
-                <button
-                  onClick={handleTranscribe}
-                  className="w-full py-3 px-5 text-white font-bold rounded-lg transition-all duration-300 bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg"
-                >
-                  Start Transcription
-                </button>
-              )}
-            </div>
-          )}
-        </>
-      );
+      return renderFileUploadModule();
     } else if (activeModule === 'url') {
-      return (
-        <>
-          {!audioSource.previewUrl ? (
-            <div className="bg-gray-750 rounded-lg p-6 mb-6 border border-gray-700">
-              <UrlUpload 
-                setTaskId={setTaskId}
-                setIsUploading={setIsUploading}
-                setUploadProgress={setUploadProgress}
-                clearTranscription={clearTranscription}
-                onUploadSuccess={handleUploadSuccess}
-              />
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <AudioPlayer audioUrl={audioSource.previewUrl} />
-              {taskId && !transcript && (
-                <button
-                  onClick={handleTranscribe}
-                  className="w-full py-3 px-5 text-white font-bold rounded-lg transition-all duration-300 bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg"
-                >
-                  Start Transcription
-                </button>
-              )}
-            </div>
-          )}
-        </>
-      );
+      return renderUrlUploadModule();
     }
     return null;
   };
 
+  // Render file upload module
+  const renderFileUploadModule = () => {
+    return (
+      <>
+        {!audioSource.previewUrl ? (
+          <div className="bg-gray-750 rounded-lg p-6 mb-6 border border-gray-700">
+            <FileUpload 
+              setTaskId={setTaskId}
+              setIsUploading={setIsUploading}
+              setUploadProgress={setUploadProgress}
+              clearTranscription={clearTranscription}
+              onUploadSuccess={handleUploadSuccess}
+            />
+          </div>
+        ) : (
+          renderAudioPreview()
+        )}
+      </>
+    );
+  };
+
+  // Render URL upload module
+  const renderUrlUploadModule = () => {
+    return (
+      <>
+        {!audioSource.previewUrl ? (
+          <div className="bg-gray-750 rounded-lg p-6 mb-6 border border-gray-700">
+            <UrlUpload 
+              setTaskId={setTaskId}
+              setIsUploading={setIsUploading}
+              setUploadProgress={setUploadProgress}
+              clearTranscription={clearTranscription}
+              onUploadSuccess={handleUploadSuccess}
+            />
+          </div>
+        ) : (
+          renderAudioPreview()
+        )}
+      </>
+    );
+  };
+
+  // Render audio preview with transcribe button
+  const renderAudioPreview = () => {
+    return (
+      <div className="space-y-4">
+        <AudioPlayer audioUrl={audioSource.previewUrl!} />
+        {taskId && !transcript && (
+          <button
+            onClick={handleTranscribe}
+            className="w-full py-3 px-5 text-white font-bold rounded-lg transition-all duration-300 bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg"
+          >
+            Start Transcription
+          </button>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen w-full bg-gray-900 flex flex-col items-center justify-center p-6 text-gray-200">
-            <div className="text-center mb-10">
+      {/* Header */}
+      <div className="text-center mb-10">
         <h1 className="text-5xl font-extrabold text-gray-100 mb-4">
           <span className="text-blue-400">Clear</span>Converse
         </h1>
@@ -315,11 +335,13 @@ const App: React.FC = () => {
         </p>
       </div>
 
+      {/* WebSocket progress handler */}
       {taskId && isProcessing && (
         <WebSocketProgressHandler 
           taskId={taskId} 
           onProgressUpdate={handleProgressUpdate}
           onComplete={handleProcessingComplete}
+          onConnectionFailed={handleWebSocketConnectionFailed}
         />
       )}
     
@@ -327,6 +349,7 @@ const App: React.FC = () => {
         <MainMenu onSelectModule={handleModuleSelect} />
       ) : (
         <div className="w-full max-w-3xl bg-gray-800 shadow-xl rounded-xl p-8 border border-gray-700">
+          {/* Module header with back button */}
           <div className="flex justify-between items-center mb-6">
             <h1 className="text-3xl font-extrabold tracking-tight text-gray-100">
               {activeModule === 'upload' ? 'File Upload' : 'Google Drive URL'}
@@ -342,8 +365,10 @@ const App: React.FC = () => {
             </button>
           </div>
           
+          {/* Module content */}
           {renderModuleContent()}
 
+          {/* Upload progress */}
           {isUploading && (
             <div className="mt-6">
               <div className="flex items-center justify-between mb-2">
@@ -353,11 +378,11 @@ const App: React.FC = () => {
             </div>
           )}
 
+          {/* Processing progress */}
           {isProcessing && (
             <div className="mt-6">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-lg font-semibold text-gray-200">Processing Progress</h3>
-                {/* Connection status indicator removed */}
               </div>
               <ProgressBar 
                 progress={processingProgress} 
@@ -368,6 +393,7 @@ const App: React.FC = () => {
             </div>
           )}
 
+          {/* Reset button when audio is loaded but not processing */}
           {audioSource.previewUrl && !transcript && !isUploading && !isProcessing && (
             <div className="mt-6 flex gap-4">
               <button
@@ -382,6 +408,7 @@ const App: React.FC = () => {
             </div>
           )}
 
+          {/* Transcription display */}
           {transcript && downloadUrl && (
             <TranscriptionDisplay 
               transcript={transcript} 
@@ -393,6 +420,7 @@ const App: React.FC = () => {
         </div>
       )}
       
+      {/* Floating reset button */}
       {!showMainMenu && (audioSource.previewUrl || isUploading || isProcessing || transcript) && (
         <ResetButton 
           onReset={resetState}
@@ -402,6 +430,7 @@ const App: React.FC = () => {
         />
       )}
       
+      {/* Floating clear button */}
       {!showMainMenu && audioSource.previewUrl && transcript && !isUploading && !isProcessing && (
         <div className="fixed bottom-6 left-6 z-10">
           <ClearButton 
@@ -412,6 +441,7 @@ const App: React.FC = () => {
         </div>
       )}
       
+      {/* Footer */}
       <footer className="mt-8 text-center text-gray-500 text-sm">
         © 2025 ClearConverse
       </footer>

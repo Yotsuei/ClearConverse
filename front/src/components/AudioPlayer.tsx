@@ -3,10 +3,9 @@ import React, { useRef, useState, useEffect } from 'react';
 
 interface AudioPlayerProps {
   audioUrl: string;
-  onTranscribe?: () => void; // Keeping the prop but won't render the button
 }
 
-const AudioPlayer: React.FC<AudioPlayerProps> = ({ audioUrl, onTranscribe }) => {
+const AudioPlayer: React.FC<AudioPlayerProps> = ({ audioUrl }) => {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
@@ -105,7 +104,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ audioUrl, onTranscribe }) => 
         preload="metadata"
       />
 
-      {/* Time display above progress bar */}
+      {/* Time display */}
       <div className="flex justify-between text-xs text-gray-400 mb-1">
         <span>{formatTime(currentTime)}</span>
         <span>{formatTime(duration)}</span>
@@ -125,19 +124,22 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ audioUrl, onTranscribe }) => 
 
       {/* Controls */}
       <div className="flex justify-center items-center gap-6 mb-4">
+        {/* Skip Backward Button */}
         <button 
           onClick={handleSkipBackward}
           className="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-blue-400 transition-colors"
+          aria-label="Skip backward 10 seconds"
         >
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.333 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z"></path>
           </svg>
-          <span className="sr-only">Backward 10s</span>
         </button>
 
+        {/* Play/Pause Button */}
         <button 
           onClick={handlePlayPause}
           className="w-14 h-14 rounded-full bg-blue-600 flex items-center justify-center text-white hover:bg-blue-700 transition-colors"
+          aria-label={isPlaying ? "Pause" : "Play"}
         >
           {isPlaying ? (
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -149,21 +151,19 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ audioUrl, onTranscribe }) => 
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
             </svg>
           )}
-          <span className="sr-only">{isPlaying ? 'Pause' : 'Play'}</span>
         </button>
 
+        {/* Skip Forward Button */}
         <button 
           onClick={handleSkipForward}
           className="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-blue-400 transition-colors"
+          aria-label="Skip forward 10 seconds"
         >
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11.933 12.8a1 1 0 000-1.6L6.6 7.2A1 1 0 005 8v8a1 1 0 001.6.8l5.333-4zM19.933 12.8a1 1 0 000-1.6l-5.333-4A1 1 0 0013 8v8a1 1 0 001.6.8l5.333-4z"></path>
           </svg>
-          <span className="sr-only">Forward 10s</span>
         </button>
       </div>
-
-      {/* Removed "Transcribe Audio" button */}
     </div>
   );
 };
