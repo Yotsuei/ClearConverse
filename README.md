@@ -25,6 +25,32 @@ Before you begin, ensure you have the following installed:
 
 You'll also need a Hugging Face account and API token for accessing the required AI models.
 
+## Models
+
+This project uses speech recognition and separation models to process audio:
+
+### Local Fine-tuned Models
+
+For our specific research implementation, we use:
+- Custom fine-tuned Whisper model for transcription
+- Custom fine-tuned RESepFormer model for speech separation
+
+These fine-tuned models are stored locally and are not included in this repository.
+
+### Using Your Own Models
+
+You can use your own fine-tuned versions of these models by:
+1. Placing your model files in the `back/models/` directory
+2. Updating the model paths in the backend configuration
+
+### Fallback to Pre-trained Models
+
+If no custom models are provided, the application will automatically download and use the pre-trained versions of:
+- Whisper from OpenAI
+- RESepFormer from SpeechBrain
+
+Note that performance may vary depending on which models are used.
+
 ## Getting Started
 
 ### Clone the Repository
