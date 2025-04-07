@@ -1,0 +1,36 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./back
+      dockerfile: Dockerfile
+    restart: always
+    environment:
+      - ENV_FILE=${ENV_FILE:-'.env.production'}
+    volumes:
+      - ./models:/app/models
+      - ./processed_audio:/app/processed_audio
+      - ./temp_uploads:/app/temp_uploads
+    ports:
+      - "${API_PORT:-8000}:8000"
+    command: uvicorn api:app --host 0.0.0.0 --port 8000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./front
+      dockerfile: Dockerfile
+      args:
+        - REACT_APP_API_BASE_URL=${REACT_APP_API_BASE_URL:-http://localhost:8000}
+        - REACT_APP_WS_BASE_URL=${REACT_APP_WS_BASE_URL:-ws://localhost:8000}
+    restart: always
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      - backend

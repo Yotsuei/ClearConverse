@@ -1,5 +1,6 @@
 // components/UrlUpload.tsx
 import React, { useState } from 'react';
+import config from '../config';
 
 interface UrlUploadProps {
   setTaskId: (taskId: string) => void;
@@ -75,7 +76,6 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
   };
 
   const handleUpload = async () => {
-    
     if (!url || !isValidUrl) {
       setUrlError('Please enter a valid audio/video URL');
       return;
@@ -86,14 +86,14 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
     
     // Create form data with the URL
     const formData = new FormData();
-    formData.append('url', url);
+    formData.append('url', url);  
 
     try {
       // Implement XMLHttpRequest for progress tracking
       const xhr = new XMLHttpRequest();
       setUploadXhr(xhr);
       
-      xhr.open('POST', 'http://localhost:8000/upload-url');
+      xhr.open('POST', `${config.api.baseUrl}/upload-url`);  
       
       // Simulate progress
       let simulatedProgress = 0;

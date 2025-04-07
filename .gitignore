@@ -1,35 +1,161 @@
-# Backend
-back/venv/
-back/__pycache__/
-back/*.pyc
-back/*.pyo
-back/*.pyd
-back/.Python
-back/pip-log.txt
-back/.env
-back/models/
-back/processed_audio
-back/temp_uploads
-back/tmpdir_resepformer
-back/*.env
+# ClearConverse Project .gitignore
+# ==============================
 
-# Frontend
-front/node_modules/
+# Environment Files
+# ----------------
+# Root level
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+.env.*.local
+
+# Backend specific
+back/.env
+back/.env.*
+back/.env.local
+back/.env.*.local
+
+# Frontend specific
 front/.env
-front/dist/
-front/build/
-front/.cache/
-front/coverage/
+front/.env.*
 front/.env.local
+front/.env.*.local
+front/.env.development
+front/.env.production
 front/.env.development.local
 front/.env.test.local
 front/.env.production.local
+
+# Backend (Python)
+# ---------------
+# Byte-compiled / optimized files
+back/__pycache__/
+back/**/__pycache__/
+back/**/**/__pycache__/
+back/*.py[cod]
+back/*$py.class
+
+# Distribution / packaging
+back/dist/
+back/build/
+back/*.egg-info/
+
+# Virtual environments
+back/venv/
+back/env/
+back/.env/
+back/.venv/
+back/ENV/
+
+# Logs and databases
+back/*.log
+back/logs/
+back/*.sqlite3
+back/*.db
+
+# Application specific data
+back/models/
+back/processed_audio/
+back/temp_uploads/
+
+# Frontend (JavaScript/TypeScript)
+# -------------------------------
+# Dependencies
+front/node_modules/
+front/.pnp/
+front/.pnp.js
+
+# Testing
+front/coverage/
+
+# Production build
+front/dist/
+front/build/
+front/.vite/
+
+# Logs
 front/npm-debug.log*
 front/yarn-debug.log*
 front/yarn-error.log*
+front/pnpm-debug.log*
+front/logs/
+front/*.log
 
-# IDE
-.vscode/
+# Editor & IDE
+# -----------
+# VSCode
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+!.vscode/tasks.json.example
+!.vscode/launch.json.example
+
+# IntelliJ/JetBrains
 .idea/
+*.iml
+*.iws
+*.ipr
+.idea_modules/
+
+# Others
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS Specific
+# ----------
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Docker
+# ------
+docker-volumes/
+docker-compose.override.yml
+.docker/
+
+# Configuration files
+# ------------------
+# Keep infrastructure code in the repository
+# nginx.conf should be committed as it's part of the infrastructure definition
+
+# ML Models & Data Files
+# ---------------------
+*.pt
+*.pth
+*.bin
+*.onnx
+*.h5
+*.hdf5
+*.pkl
+*.joblib
+
+# SSL/TLS Certificates
+# ------------------
+*.pem
+*.key
+*.crt
+*.cer
+*.der
+*.p12
+*.pfx
+
+# Temporary files
+# --------------
+*.tmp
+*.bak
 *.swp
 *.swo
+*~
