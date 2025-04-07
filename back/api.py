@@ -281,27 +281,23 @@ class EnhancedAudioProcessor:
 
     def _initialize_models(self):
         logging.info(f"Initializing models on {self.device}...")
-        cache_dir = "models" 
-
+        cache_dir = "models"  
         self.separator = SepformerSeparation.from_hparams(
             source="speechbrain/resepformer-wsj02mix",
             savedir=os.path.join(cache_dir, "resepformer"),
             run_opts={"device": self.device}
         )
         self.whisper_model = whisper.load_model(self.config.whisper_model_size, download_root=os.path.join(cache_dir, "whisper")).to(self.device)
-
         self.diarization = Pipeline.from_pretrained(
             "pyannote/speaker-diarization-3.1",
             use_auth_token=self.config.auth_token,
             cache_dir=os.path.join(cache_dir, "speaker-diarization")
         ).to(self.device)
-
         self.vad_pipeline = Pipeline.from_pretrained(
             "pyannote/voice-activity-detection",
             use_auth_token=self.config.auth_token,
             cache_dir=os.path.join(cache_dir, "vad")
         ).to(self.device)
-
         self.embedding_model = Inference(
             "pyannote/embedding",
             window="whole",
@@ -752,7 +748,6 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 temp_uploads = Path("temp_uploads")
 temp_uploads.mkdir(exist_ok=True)
 
-
 load_dotenv()
 AUTH_TOKEN = os.getenv("HF_AUTH_TOKEN")
 config = Config(auth_token=AUTH_TOKEN)
@@ -928,15 +923,20 @@ async def progress_ws(websocket: WebSocket, task_id: str):
     await websocket.accept()
     try:
         while True:
-            data = progress_store.get(task_id, {"progress": 0, "message": "Waiting..."})
+            # Initial connection acknowledgement
+            await websocket.send_json({"status": "connected"})
+            data = progress_store.get(task_id, {"progress": 0, "message": "Initializing..."})
             await websocket.send_json(data)
             if data.get("progress", 0) >= 100:
                 break
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5)  # Frequent updates
     except Exception as e:
         logging.error(f"WebSocket error for task {task_id}: {e}")
     finally:
-        await websocket.close()
+        try:
+            await websocket.close()
+        except RuntimeError as e:
+            logging.info(f"WebSocket for task {task_id} already closed: {e}")
 
 # -----------------------------------------------------------------------------
 # Endpoint: Download Transcript
@@ -974,3 +974,4 @@ async def cleanup(task_id: str):
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+

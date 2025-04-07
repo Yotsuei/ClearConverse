@@ -1,4 +1,4 @@
-// App.tsx
+// App.tsx - Updated Progress Handling
 import React, { useState, useRef, useEffect } from 'react';
 import FileUpload from './components/FileUpload';
 import UrlUpload from './components/UrlUpload';
@@ -12,7 +12,7 @@ import WebSocketProgressHandler from './components/WebSocketProgressHandler';
 import './index.css';
 
 type AudioSource = {
-  previewUrl: string | null; // Changed from url to previewUrl
+  previewUrl: string | null;
 };
 
 type Module = 'upload' | 'url';
@@ -28,7 +28,9 @@ const App: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingProgress, setProcessingProgress] = useState(0);
   const [taskId, setTaskId] = useState<string | null>(null);
-  const [processingMessage, setProcessingMessage] = useState<string>('Processing...');
+  const [processingMessage, setProcessingMessage] = useState<string>('Preparing to process...');
+  const [isWsConnected, setIsWsConnected] = useState(false);
+  const [connectionAttempts, setConnectionAttempts] = useState(0);
   
   // Add XHR reference to allow cancellation of in-progress requests
   const xhrRef = useRef<XMLHttpRequest | null>(null);
@@ -39,6 +41,39 @@ const App: React.FC = () => {
       fetchTranscription(taskId);
     }
   }, [processingProgress, taskId]);
+
+  // Effect to handle websocket connection failures
+  useEffect(() => {
+    if (connectionAttempts > 0 && !isWsConnected && isProcessing) {
+      // Poll for progress as a fallback if WebSocket fails
+      const pollInterval = setInterval(() => {
+        if (taskId) {
+          pollTaskProgress(taskId);
+        }
+      }, 2000);
+      
+      return () => clearInterval(pollInterval);
+    }
+  }, [connectionAttempts, isWsConnected, isProcessing, taskId]);
+
+  const pollTaskProgress = async (taskId: string) => {
+    try {
+      const response = await fetch(`http://localhost:8000/task/${taskId}/result`);
+      if (response.ok) {
+        const data = await response.json();
+        
+        // If we have a download URL, processing is complete
+        if (data.download_url) {
+          setProcessingProgress(100);
+          setProcessingMessage("Processing complete!");
+          setDownloadUrl(data.download_url);
+          fetchTranscription(taskId);
+        }
+      }
+    } catch (error) {
+      console.error("Error polling for progress:", error);
+    }
+  };
 
   const fetchTranscription = async (taskId: string) => {
     try {
@@ -65,13 +100,34 @@ const App: React.FC = () => {
   };
 
   const handleProgressUpdate = (progress: number, message: string) => {
-    setProcessingProgress(progress);
+    if (progress > 0) {
+      setIsWsConnected(true);
+    }
+    
+    // Ensure we never go backwards in progress
+    if (progress >= processingProgress || progress === 0) {
+      setProcessingProgress(progress);
+    }
+    
     setProcessingMessage(message);
-  };
+    
+    // If progress complete, mark as connected and notify
+    if (progress === 100) {
+      setIsWsConnected(true);
+    }
+  }; 
 
   const handleProcessingComplete = (downloadUrl: string) => {
-    if (!downloadUrl) {
+    if (downloadUrl) {
       setDownloadUrl(downloadUrl);
+    }
+  };
+
+  const handleWebSocketConnectionFailed = () => {
+    setConnectionAttempts(prev => prev + 1);
+    if (connectionAttempts >= 3) {
+      setIsWsConnected(false);
+      setProcessingMessage("Processing in progress...");
     }
   };
 
@@ -94,7 +150,9 @@ const App: React.FC = () => {
     setIsProcessing(false);
     setProcessingProgress(0);
     setTaskId(null);
-    setProcessingMessage('Processing...');
+    setProcessingMessage('Preparing to process...');
+    setIsWsConnected(false);
+    setConnectionAttempts(0);
   };
   
   const clearTranscription = () => {
@@ -150,8 +208,10 @@ const App: React.FC = () => {
     }
     
     setIsProcessing(true);
-    setProcessingProgress(0);
+    setProcessingProgress(5); // Start with a small progress indication
     setProcessingMessage('Starting transcription...');
+    setIsWsConnected(false);
+    setConnectionAttempts(0);
 
     try {
       const response = await fetch(`http://localhost:8000/transcribe/${taskId}`, {
@@ -164,6 +224,9 @@ const App: React.FC = () => {
       
       const data = await response.json();
       console.log('Transcription started:', data);
+      
+      // Update UI to show the transcription has started
+      setProcessingMessage('Processing in progress...');
     } catch (error) {
       console.error('Error starting transcription:', error);
       alert(`Failed to start transcription: ${(error as Error).message}`);
@@ -243,6 +306,15 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen w-full bg-gray-900 flex flex-col items-center justify-center p-6 text-gray-200">
+            <div className="text-center mb-10">
+        <h1 className="text-5xl font-extrabold text-gray-100 mb-4">
+          <span className="text-blue-400">Clear</span>Converse
+        </h1>
+        <p className="text-xl text-gray-400 max-w-3xl mx-auto">
+          A speech transcription tool mainly powered by Whisper-RESepFormer solution to offer quality transcription even in overlapping speech scenarios.
+        </p>
+      </div>
+
       {taskId && isProcessing && (
         <WebSocketProgressHandler 
           taskId={taskId} 
@@ -285,6 +357,7 @@ const App: React.FC = () => {
             <div className="mt-6">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-lg font-semibold text-gray-200">Processing Progress</h3>
+                {/* Connection status indicator removed */}
               </div>
               <ProgressBar 
                 progress={processingProgress} 
@@ -292,7 +365,6 @@ const App: React.FC = () => {
                 onCancel={cancelTranscription}
                 message={processingMessage}
               />
-              <p className="text-sm text-gray-400 mt-2">{processingMessage}</p>
             </div>
           )}
 
@@ -341,7 +413,7 @@ const App: React.FC = () => {
       )}
       
       <footer className="mt-8 text-center text-gray-500 text-sm">
-        © 2025 Speech Transcription Tool
+        © 2025 ClearConverse
       </footer>
     </div>
   );

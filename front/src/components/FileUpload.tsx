@@ -6,7 +6,7 @@ interface FileUploadProps {
   setIsUploading: (isUploading: boolean) => void;
   setUploadProgress: (progress: number) => void;
   clearTranscription: () => void;
-  onUploadSuccess: (previewUrl: string) => void; // Add this
+  onUploadSuccess: (previewUrl: string, taskId: string) => void;
 }
 
 const FileUpload: React.FC<FileUploadProps> = ({ 
@@ -14,7 +14,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
   setIsUploading, 
   setUploadProgress,
   clearTranscription,
-  onUploadSuccess // Add this
+  onUploadSuccess
 }) => {
   const [file, setFile] = useState<File | null>(null);
   const [dragActive, setDragActive] = useState(false);
@@ -159,8 +159,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
           if (response.task_id && response.preview_url) {
             console.log('File uploaded. Task ID:', response.task_id);
             setTaskId(response.task_id);
-            onUploadSuccess(response.preview_url, response.task_id); // Pass both values
-    
+            onUploadSuccess(response.preview_url, response.task_id);
           } else {
             throw new Error('No task ID returned from server');
           }
