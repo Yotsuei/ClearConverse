@@ -71,8 +71,8 @@ const WebSocketProgressHandler: React.FC<WebSocketProgressHandlerProps> = ({
       console.error('WebSocket error:', event);
       setError('WebSocket connection error');
       
-      // Show indeterminate progress with error message
-      onProgressUpdate(5, 'Connection error. Attempting to reconnect...');
+      // Show generic processing message instead of connection error
+      onProgressUpdate(5, 'Processing in progress...');
     };
 
     ws.onclose = (event) => {
@@ -84,7 +84,7 @@ const WebSocketProgressHandler: React.FC<WebSocketProgressHandlerProps> = ({
         console.log(`Attempting to reconnect in ${timeoutDelay}ms (attempt ${reconnectAttempts.current + 1}/${maxReconnectAttempts})`);
         
         reconnectAttempts.current += 1;
-        onProgressUpdate(5, `Connection lost. Reconnecting (attempt ${reconnectAttempts.current}/${maxReconnectAttempts})...`);
+        onProgressUpdate(5, `Processing in progress...`);
         
         // Set timeout for reconnection
         reconnectTimeoutRef.current = setTimeout(() => {
@@ -92,7 +92,7 @@ const WebSocketProgressHandler: React.FC<WebSocketProgressHandlerProps> = ({
         }, timeoutDelay);
       } else if (reconnectAttempts.current >= maxReconnectAttempts) {
         console.log('Maximum reconnection attempts reached');
-        onProgressUpdate(0, 'Connection failed. Please try restarting the transcription.');
+        onProgressUpdate(5, 'Processing in progress...');
       }
     };
   };

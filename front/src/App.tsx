@@ -1,4 +1,4 @@
-// App.tsx
+//App.tsx
 import React, { useState, useRef, useEffect } from 'react';
 import FileUpload from './components/FileUpload';
 import UrlUpload from './components/UrlUpload';
@@ -127,7 +127,7 @@ const App: React.FC = () => {
     setConnectionAttempts(prev => prev + 1);
     if (connectionAttempts >= 3) {
       setIsWsConnected(false);
-      setProcessingMessage("Connection error. Using fallback method to check progress...");
+      setProcessingMessage("Processing in progress...");
     }
   };
 
@@ -226,7 +226,7 @@ const App: React.FC = () => {
       console.log('Transcription started:', data);
       
       // Update UI to show the transcription has started
-      setProcessingMessage('Transcription initiated, connecting to progress updates...');
+      setProcessingMessage('Processing in progress...');
     } catch (error) {
       console.error('Error starting transcription:', error);
       alert(`Failed to start transcription: ${(error as Error).message}`);
@@ -357,14 +357,7 @@ const App: React.FC = () => {
             <div className="mt-6">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-lg font-semibold text-gray-200">Processing Progress</h3>
-                {!isWsConnected && connectionAttempts > 0 && (
-                  <span className="text-yellow-400 text-xs font-medium flex items-center gap-1">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                    </svg>
-                    Live updates unavailable
-                  </span>
-                )}
+                {/* Connection status indicator removed */}
               </div>
               <ProgressBar 
                 progress={processingProgress} 
