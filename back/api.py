@@ -924,15 +924,20 @@ async def get_task_result(task_id: str):
 # Endpoint: WebSocket for Progress Updates
 # -----------------------------------------------------------------------------
 @app.websocket("/ws/progress/{task_id}")
+@app.websocket("/ws/progress/{task_id}")
 async def progress_ws(websocket: WebSocket, task_id: str):
     await websocket.accept()
     try:
         while True:
-            data = progress_store.get(task_id, {"progress": 0, "message": "Waiting..."})
+            # Add initial connection acknowledgement
+            await websocket.send_json({"status": "connected"})
+            
+            data = progress_store.get(task_id, {"progress": 0, "message": "Initializing..."})
             await websocket.send_json(data)
+            
             if data.get("progress", 0) >= 100:
                 break
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5)  # More frequent updates
     except Exception as e:
         logging.error(f"WebSocket error for task {task_id}: {e}")
     finally:

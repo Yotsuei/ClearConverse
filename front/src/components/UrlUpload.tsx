@@ -163,15 +163,9 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
       new URL(pastedText);
       const isAudioVideo = 
         pastedText.includes('drive.google.com') || 
-        pastedText.includes('docs.google.com') || 
         pastedText.includes('storage.googleapis.com') ||
-        pastedText.includes('youtube.com') ||
-        pastedText.includes('youtu.be') ||
-        pastedText.includes('soundcloud.com') ||
         pastedText.endsWith('.mp3') ||
-        pastedText.endsWith('.wav') ||
-        pastedText.endsWith('.ogg') ||
-        pastedText.endsWith('.mp4');
+        pastedText.endsWith('.wav')
         
       if (isAudioVideo) {
         setIsValidUrl(true);
@@ -228,7 +222,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
           <p className="mt-1 text-sm text-red-400">{urlError}</p>
         )}
         <p className="mt-1 text-sm text-gray-400">
-          Paste a link to an audio/video file. For Google Drive, make sure the file is publicly accessible.
+          Paste a link to an audio file from Google Drive. Make sure the file is publicly accessible.
         </p>
       </div>
       
@@ -243,10 +237,8 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
             <h3 className="text-sm font-medium text-gray-200">Supported URLs</h3>
             <div className="mt-2 text-sm text-gray-400">
               <ul className="list-disc pl-5 space-y-1">
-                <li>Direct links to MP3, WAV, OGG, or MP4 files</li>
+                <li>Direct links to MP3 or WAV files</li>
                 <li>Google Drive shared audio/video files</li>
-                <li>YouTube videos (audio will be extracted)</li>
-                <li>SoundCloud tracks (if publicly accessible)</li>
               </ul>
             </div>
             <p className="mt-2 text-xs text-gray-400">

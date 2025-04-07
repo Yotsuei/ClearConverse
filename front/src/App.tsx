@@ -29,6 +29,7 @@ const App: React.FC = () => {
   const [processingProgress, setProcessingProgress] = useState(0);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [processingMessage, setProcessingMessage] = useState<string>('Preparing to process...');
+  const [isWsConnected, setIsWsConnected] = useState(false);
   
   // Add XHR reference to allow cancellation of in-progress requests
   const xhrRef = useRef<XMLHttpRequest | null>(null);
@@ -65,9 +66,12 @@ const App: React.FC = () => {
   };
 
   const handleProgressUpdate = (progress: number, message: string) => {
+    if (progress > 0 && !isWsConnected) {
+      setIsWsConnected(true);
+    }
     setProcessingProgress(progress);
     setProcessingMessage(message);
-  };
+  }; 
 
   const handleProcessingComplete = (downloadUrl: string) => {
     if (downloadUrl) {
@@ -243,6 +247,15 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen w-full bg-gray-900 flex flex-col items-center justify-center p-6 text-gray-200">
+            <div className="text-center mb-10">
+        <h1 className="text-5xl font-extrabold text-gray-100 mb-4">
+          <span className="text-blue-400">Clear</span>Converse
+        </h1>
+        <p className="text-xl text-gray-400 max-w-3xl mx-auto">
+          A speech transcription tool mainly powered by Whisper-RESepFormer solution to offer quality transcription even in overlapping speech scenarios.
+        </p>
+      </div>
+
       {taskId && isProcessing && (
         <WebSocketProgressHandler 
           taskId={taskId} 
@@ -341,7 +354,7 @@ const App: React.FC = () => {
       )}
       
       <footer className="mt-8 text-center text-gray-500 text-sm">
-        © 2025 Speech Transcription Tool
+        © 2025 ClearConverse
       </footer>
     </div>
   );

@@ -23,9 +23,11 @@ const WebSocketProgressHandler: React.FC<WebSocketProgressHandlerProps> = ({
       socket.close();
     }
 
-    // Create new WebSocket connection
-    const ws = new WebSocket(`ws://localhost:8000/ws/progress/${taskId}`);
-    setSocket(ws);
+    const wsUrl = process.env.NODE_ENV === 'development' 
+      ? `ws://localhost:8000/ws/progress/${taskId}`
+      : `wss://${window.location.host}/ws/progress/${taskId}`; // For production using HTTPS
+
+    const ws = new WebSocket(wsUrl);
 
     // Set up event handlers
     ws.onopen = () => {

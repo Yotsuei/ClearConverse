@@ -8,15 +8,6 @@ interface MainMenuProps {
 const MainMenu: React.FC<MainMenuProps> = ({ onSelectModule }) => {
   return (
     <div className="w-full max-w-4xl mx-auto">
-      <div className="text-center mb-10">
-        <h1 className="text-5xl font-extrabold text-gray-100 mb-4">
-          <span className="text-blue-400">Clear</span>Converse
-        </h1>
-        <p className="text-xl text-gray-400 max-w-3xl mx-auto">
-          A speech transcription tool mainly powered by Whisper-RESepFormer solution to offer quality transcription even in overlapping speech scenarios.
-        </p>
-      </div>
-
       <div className="grid md:grid-cols-2 gap-8 mt-12 max-w-3xl mx-auto">
         {/* Upload Audio File Card */}
         <div 
