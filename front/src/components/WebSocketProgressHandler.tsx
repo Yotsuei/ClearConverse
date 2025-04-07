@@ -1,24 +1,30 @@
 // components/WebSocketProgressHandler.tsx
 import { useEffect, useRef } from 'react';
+import config from '../config';
 
 interface WebSocketProgressHandlerProps {
   taskId: string | null;
+  apiBaseUrl?: string;
+  wsBaseUrl?: string;
   onProgressUpdate: (progress: number, message: string) => void;
   onComplete: (downloadUrl: string) => void;
   onConnectionFailed?: () => void;
+  maxReconnectAttempts?: number;
 }
+
 
 const WebSocketProgressHandler: React.FC<WebSocketProgressHandlerProps> = ({ 
   taskId, 
+  apiBaseUrl = config.api.baseUrl,
+  wsBaseUrl = config.api.wsBaseUrl,
   onProgressUpdate,
   onComplete,
-  onConnectionFailed
+  onConnectionFailed,
+  maxReconnectAttempts = config.ui.maxWebSocketReconnectAttempts
 }) => {
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectAttempts = useRef(0);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const MAX_RECONNECT_ATTEMPTS = 5;
-  const API_BASE_URL = 'http://localhost:8000';
 
   // Function to establish WebSocket connection
   const connectWebSocket = () => {
@@ -29,7 +35,7 @@ const WebSocketProgressHandler: React.FC<WebSocketProgressHandlerProps> = ({
       socketRef.current.close();
     }
 
-    const wsUrl = `ws://localhost:8000/ws/progress/${taskId}`;
+    const wsUrl = `${wsBaseUrl}/ws/progress/${taskId}`;
     console.log(`Connecting to WebSocket: ${wsUrl}`);
 
     const ws = new WebSocket(wsUrl);
@@ -75,7 +81,7 @@ const WebSocketProgressHandler: React.FC<WebSocketProgressHandlerProps> = ({
       console.log(`WebSocket connection closed: ${event.code} ${event.reason}`);
       
       // Attempt to reconnect unless this was a normal closure
-      if (event.code !== 1000 && reconnectAttempts.current < MAX_RECONNECT_ATTEMPTS) {
+      if (event.code !== 1000 && reconnectAttempts.current < maxReconnectAttempts) {
         const timeoutDelay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 10000);
         
         reconnectAttempts.current += 1;
@@ -85,7 +91,7 @@ const WebSocketProgressHandler: React.FC<WebSocketProgressHandlerProps> = ({
         reconnectTimeoutRef.current = setTimeout(() => {
           connectWebSocket();
         }, timeoutDelay);
-      } else if (reconnectAttempts.current >= MAX_RECONNECT_ATTEMPTS) {
+      } else if (reconnectAttempts.current >= maxReconnectAttempts) {
         onProgressUpdate(5, 'Processing in progress...');
         if (onConnectionFailed) onConnectionFailed();
       }
@@ -110,7 +116,7 @@ const WebSocketProgressHandler: React.FC<WebSocketProgressHandlerProps> = ({
 
   const checkTaskResult = async (taskId: string) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/task/${taskId}/result`);
+      const response = await fetch(`${apiBaseUrl}/task/${taskId}/result`);
       
       if (!response.ok) {
         throw new Error(`Failed to fetch task result: ${response.status} ${response.statusText}`);

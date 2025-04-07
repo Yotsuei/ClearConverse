@@ -1,58 +1,22 @@
-annotated-types
-anyio
-certifi
-charset-normalizer
-click
-colorama
-fastapi
-filelock
-fsspec
-h11
-huggingface-hub
-HyperPyYAML
-idna
-joblib
-MarkupSafe
-mpmath
-networkx
-numpy
-packaging
-pydantic_core
-python-multipart
-PyYAML
-regex
-requests
-ruamel.yaml
-ruamel.yaml.clib
-safetensors
-scipy
-sentencepiece
-setuptools
-sniffio
-speechbrain
-starlette
-sympy
-tokenizers
-torch
-torchaudio
-tqdm
-transformers
-typing_extensions
-urllib3
-uvicorn    
-noisereduce 
-pyannote.audio 
-openai-whisper
-dotenv
-ffmpeg-python
-apscheduler
-websockets
-# URL handling and validation
-validators==0.22.0
-requests==2.31.0
+# back/requirements.txt
 
-# FFmpeg Python wrapper for better integration
-ffmpeg-python==0.2.0
-
-# Update the dotenv line to correctly specify the package
+# Core web framework
+fastapi==0.105.0
+uvicorn==0.24.0
+python-multipart==0.0.6
+pydantic==2.5.2
 python-dotenv==1.0.0
+
+# Audio and ML libraries
+torch==2.1.1
+torchaudio==2.1.1
+whisper==1.1.10
+pyannote.audio==3.1.1
+speechbrain==0.5.15
+noisereduce==2.0.1
+numpy==1.26.2
+
+# Utilities
+apscheduler==3.10.4
+requests==2.31.0
+validators==0.22.0

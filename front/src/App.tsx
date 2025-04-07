@@ -20,7 +20,7 @@ type AudioSource = {
 type Module = 'upload' | 'url';
 
 // API configuration
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = config.api.baseUrl;
 
 const App: React.FC = () => {
   // State management
@@ -339,10 +339,13 @@ const App: React.FC = () => {
       {/* WebSocket progress handler */}
       {taskId && isProcessing && (
         <WebSocketProgressHandler 
-          taskId={taskId} 
+          taskId={taskId}
+          apiBaseUrl={config.api.baseUrl}
+          wsBaseUrl={config.api.wsBaseUrl}
           onProgressUpdate={handleProgressUpdate}
           onComplete={handleProcessingComplete}
           onConnectionFailed={handleWebSocketConnectionFailed}
+          maxReconnectAttempts={config.ui.maxWebSocketReconnectAttempts}
         />
       )}
     

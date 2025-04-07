@@ -1056,6 +1056,10 @@ async def cleanup(task_id: str):
         
     return JSONResponse(content={"status": f"Cleaned up files for task {task_id}"})
 
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
 # =============================================================================
 # Main Entry Point
 # =============================================================================

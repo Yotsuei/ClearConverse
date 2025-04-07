@@ -1,5 +1,6 @@
 // components/TranscriptionDisplay.tsx
 import React, { useState } from 'react';
+import config from '../config';
 
 interface TranscriptionDisplayProps {
   transcript: string;
@@ -17,7 +18,8 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
   const [expanded, setExpanded] = useState(false);
   const [copySuccess, setCopySuccess] = useState<string | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState<string | null>(null);
-  const API_BASE_URL = 'http://localhost:8000';
+
+  const API_BASE_URL = config.api.baseUrl;
 
   // Format transcript with speaker highlighting
   const formatTranscript = (text: string) => {
