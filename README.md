@@ -6,7 +6,7 @@ ClearConverse is a speech transcription tool powered by Whisper-RESepFormer solu
 
 ## Features
 
-- Upload audio/video files for transcription
+- Upload audio files for transcription
 - Process audio from Google Drive URLs
 - Accurate speaker diarization (speaker identification)
 - Handle overlapping speech
