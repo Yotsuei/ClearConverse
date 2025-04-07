@@ -6,16 +6,15 @@ interface UrlUploadProps {
   setIsUploading: (isUploading: boolean) => void;
   setUploadProgress: (progress: number) => void;
   clearTranscription: () => void;
-  onUploadSuccess: (previewUrl: string, taskId: string) => void; // Add this prop
+  onUploadSuccess: (previewUrl: string, taskId: string) => void;
 }
-
 
 const UrlUpload: React.FC<UrlUploadProps> = ({ 
   setTaskId,
   setIsUploading, 
   setUploadProgress,
   clearTranscription,
-  onUploadSuccess // Add this prop
+  onUploadSuccess
 }) => {
   const [url, setUrl] = useState<string>('');
   const [isValidUrl, setIsValidUrl] = useState<boolean>(false);
@@ -96,8 +95,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
       
       xhr.open('POST', 'http://localhost:8000/upload-url');
       
-      // Since url uploads don't have reliable progress events,
-      // simulate progress with a counter
+      // Simulate progress
       let simulatedProgress = 0;
       const progressInterval = setInterval(() => {
         simulatedProgress += 5;
@@ -123,7 +121,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
             
             // Modified: Use the preview URL from backend response
             if (response.preview_url) {
-              onUploadSuccess(response.preview_url, response.task_id); // This should handle both
+              onUploadSuccess(response.preview_url, response.task_id);
             }  
           } else {
             throw new Error('No task ID returned from server');

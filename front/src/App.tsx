@@ -1,4 +1,4 @@
-//App.tsx
+// App.tsx - Updated Progress Handling
 import React, { useState, useRef, useEffect } from 'react';
 import FileUpload from './components/FileUpload';
 import UrlUpload from './components/UrlUpload';
@@ -29,8 +29,7 @@ const App: React.FC = () => {
   const [processingProgress, setProcessingProgress] = useState(0);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [processingMessage, setProcessingMessage] = useState<string>('Preparing to process...');
-  const [isWsConnected, setIsWsConnected] = useState(false);
-  const [connectionAttempts, setConnectionAttempts] = useState(0);
+  // WebSocket state variables removed
   
   // Add XHR reference to allow cancellation of in-progress requests
   const xhrRef = useRef<XMLHttpRequest | null>(null);
@@ -42,19 +41,17 @@ const App: React.FC = () => {
     }
   }, [processingProgress, taskId]);
 
-  // Effect to handle websocket connection failures
+  // Effect to poll for progress when processing is active
   useEffect(() => {
-    if (connectionAttempts > 0 && !isWsConnected && isProcessing) {
-      // Poll for progress as a fallback if WebSocket fails
+    if (isProcessing && taskId) {
+      // Poll for progress every 2 seconds
       const pollInterval = setInterval(() => {
-        if (taskId) {
-          pollTaskProgress(taskId);
-        }
+        pollTaskProgress(taskId);
       }, 2000);
       
       return () => clearInterval(pollInterval);
     }
-  }, [connectionAttempts, isWsConnected, isProcessing, taskId]);
+  }, [isProcessing, taskId]);
 
   const pollTaskProgress = async (taskId: string) => {
     try {
@@ -68,6 +65,13 @@ const App: React.FC = () => {
           setProcessingMessage("Processing complete!");
           setDownloadUrl(data.download_url);
           fetchTranscription(taskId);
+        } else {
+          // Simulate progress increment while processing is ongoing
+          setProcessingProgress(prev => {
+            // Incrementally increase progress but cap at 95% until complete
+            const newProgress = prev + Math.random() * 3;
+            return newProgress > 95 ? 95 : newProgress;
+          });
         }
       }
     } catch (error) {
@@ -99,21 +103,18 @@ const App: React.FC = () => {
     }
   };
 
-  const handleProgressUpdate = (progress: number, message: string) => {
-    if (progress > 0) {
-      setIsWsConnected(true);
-    }
-    
-    // Ensure we never go backwards in progress
+  const handleProgressUpdate = (progress: number) => {
+    // Ensure we never go backwards in progress (except for reset to 0)
     if (progress >= processingProgress || progress === 0) {
       setProcessingProgress(progress);
     }
     
-    setProcessingMessage(message);
+    // Show consistent message
+    setProcessingMessage("Processing in progress...");
     
-    // If progress complete, mark as connected and notify
+    // If progress complete, fetch the transcription
     if (progress === 100) {
-      setIsWsConnected(true);
+      fetchTranscription(taskId!);
     }
   }; 
 
@@ -123,13 +124,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleWebSocketConnectionFailed = () => {
-    setConnectionAttempts(prev => prev + 1);
-    if (connectionAttempts >= 3) {
-      setIsWsConnected(false);
-      setProcessingMessage("Processing in progress...");
-    }
-  };
+  // Remove the connection failure handler since we're not using WebSockets
 
   // Modified to handle backend preview URL
   const handleUploadSuccess = (previewUrl: string, newTaskId: string) => {
@@ -151,8 +146,7 @@ const App: React.FC = () => {
     setProcessingProgress(0);
     setTaskId(null);
     setProcessingMessage('Preparing to process...');
-    setIsWsConnected(false);
-    setConnectionAttempts(0);
+    // WebSocket reset state removed
   };
   
   const clearTranscription = () => {
@@ -315,13 +309,7 @@ const App: React.FC = () => {
         </p>
       </div>
 
-      {taskId && isProcessing && (
-        <WebSocketProgressHandler 
-          taskId={taskId} 
-          onProgressUpdate={handleProgressUpdate}
-          onComplete={handleProcessingComplete}
-        />
-      )}
+      {/* WebSocket connection removed */}
     
       {showMainMenu ? (
         <MainMenu onSelectModule={handleModuleSelect} />
