@@ -21,6 +21,8 @@ Before you begin, ensure you have the following installed:
 - [Python](https://www.python.org/downloads/) (3.9 or higher)
 - [Node.js](https://nodejs.org/) (16.x or higher)
 - [npm](https://www.npmjs.com/get-npm) (usually included with Node.js)
+- [Docker](https://www.docker.com/products/docker-desktop/) (optional, for containerized deployment)
+- [FFmpeg](https://ffmpeg.org/download.html) (required for audio processing)
 
 You'll also need a Hugging Face account and API token for accessing the required AI models.
 
@@ -51,6 +53,27 @@ If no custom models are provided, the application will automatically download an
 Note that performance may vary depending on which models are used.
 
 ## Getting Started
+
+### Quick Setup (Development)
+
+For a quick development setup, you can use our setup script:
+
+```bash
+# Make the script executable
+chmod +x dev-setup.sh
+
+# Run the setup script
+./dev-setup.sh
+```
+
+This will:
+1. Create necessary directories
+2. Set up environment files
+3. Create a Python virtual environment
+4. Install backend dependencies
+5. Install frontend dependencies
+
+After running the script, follow the displayed instructions to start the backend and frontend servers.
 
 ### Clone the Repository
 
@@ -147,6 +170,38 @@ This will start the development server, typically on port 3000.
 
 Open your browser and navigate to [http://localhost:3000](http://localhost:3000) to use the application.
 
+## Docker Deployment
+
+For easier deployment, you can use Docker:
+
+### Using Docker Compose
+
+1. Create appropriate environment files:
+   - `.env.development` for development
+   - `.env.production` for production
+
+2. Run the deployment script:
+
+```bash
+# For development
+./deploy.sh development
+
+# For production
+./deploy.sh
+```
+
+3. Access the application:
+   - Frontend: http://localhost:3000 (dev) or http://localhost:80 (prod)
+   - Backend: http://localhost:8000
+
+4. To stop and clean up:
+
+```bash
+./cleanup.sh
+```
+
+For more details about the Docker setup, refer to the [Docker Setup Documentation](docker-docs.md).
+
 ## Using ClearConverse
 
 1. **Upload Audio**
@@ -167,35 +222,6 @@ Open your browser and navigate to [http://localhost:3000](http://localhost:3000)
    - When processing is complete, you'll see the transcription with speakers labeled
    - You can download the transcript as a text file
    - Copy to clipboard option is also available
-
-## Development
-
-### Environment Configuration
-
-The application uses `.env.development` files for configuration:
-
-- Backend configuration in `back/.env.development`
-- Frontend configuration in `front/.env.development`
-
-For production deployment, create corresponding `.env.production` files.
-
-### Project Structure
-
-```
-clearconverse/
-├── back/                  # Backend (Python/FastAPI)
-│   ├── api.py             # Main API endpoints
-│   ├── requirements.txt   # Python dependencies
-│   └── Dockerfile         # Backend Docker configuration
-│
-├── front/                 # Frontend (React/Vite)
-│   ├── src/               # Source code
-│   ├── package.json       # NPM configuration
-│   └── Dockerfile         # Frontend Docker configuration
-│
-├── docker-compose.yml     # Docker Compose configuration
-└── deploy.sh              # Deployment helper script
-```
 
 ## Troubleshooting
 

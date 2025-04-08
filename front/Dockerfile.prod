@@ -1,4 +1,4 @@
-# front/Dockerfile
+# front/Dockerfile.prod
 FROM node:18-alpine as build
 
 WORKDIR /app
@@ -22,11 +22,18 @@ RUN npm run build
 # Production stage with Nginx
 FROM nginx:alpine
 
-# Copy the build output
-COPY --from=build /app/build /usr/share/nginx/html
+# Add curl for healthchecks
+RUN apk --no-cache add curl
+
+# Copy the build output to nginx directory
+COPY --from=build /app/dist /usr/share/nginx/html
 
 # Copy nginx configuration
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Add nginx healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:80/ || exit 1
 
 EXPOSE 80
 

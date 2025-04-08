@@ -102,17 +102,19 @@ const ProgressBar: React.FC<ProgressBarProps> = ({
       </div>
       
       {/* CSS Animations */}
-      <style jsx>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 0.3; }
-          50% { opacity: 0.6; }
-        }
-        
-        @keyframes indeterminate {
-          0% { left: -30%; }
-          100% { left: 100%; }
-        }
-      `}</style>
+      <style dangerouslySetInnerHTML={{
+        __html: `
+          @keyframes pulse {
+            0%, 100% { opacity: 0.3; }
+            50% { opacity: 0.6; }
+          }
+          
+          @keyframes indeterminate {
+            0% { left: -30%; }
+            100% { left: 100%; }
+          }
+        `
+      }} />
     </div>
   );
 };

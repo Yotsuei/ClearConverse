@@ -1,0 +1,25 @@
+# front/Dockerfile.dev
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Install dependencies
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# Set build arguments for API URLs
+ARG VITE_API_BASE_URL=http://localhost:8000
+ARG VITE_WS_BASE_URL=ws://localhost:8000
+
+# Set environment variables
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+ENV VITE_WS_BASE_URL=$VITE_WS_BASE_URL
+
+# We don't copy the source code here because we'll mount it as a volume
+# This allows for hot-reloading when code changes
+
+# Expose Vite development server port
+EXPOSE 5173
+
+# Start development server with host set to 0.0.0.0 to allow external connections
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]

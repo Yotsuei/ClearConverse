@@ -186,20 +186,6 @@ def enhance_audio(audio: torch.Tensor, sample_rate: int, stationary: bool = True
 # =============================================================================
 # URL Handling Utilities
 # =============================================================================
-
-def is_ffmpeg_installed():
-    """Check if ffmpeg is installed and available in PATH."""
-    try:
-        # Check differently based on platform
-        if platform.system() == "Windows":
-            # For Windows
-            subprocess.run(['where', 'ffmpeg'], check=True, capture_output=True)
-        else:
-            # For Unix/Linux/MacOS
-            subprocess.run(['which', 'ffmpeg'], check=True, capture_output=True)
-        return True
-    except (subprocess.SubprocessError, FileNotFoundError):
-        return False
         
 def download_file_from_url(url, output_path=None):
     """Download a file from a URL and save it to a temporary file if output_path is not provided."""
@@ -253,13 +239,101 @@ def download_file_from_url(url, output_path=None):
         logging.error(f"Unexpected error downloading file from URL {url}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Server error processing URL: {str(e)}")
 
+def download_file_from_google_drive(file_id, output_path=None):
+    """
+    Download a file from Google Drive using a more robust approach that handles confirmation tokens.
+    
+    Args:
+        file_id: The Google Drive file ID
+        output_path: Optional path to save the file, if None a temporary file will be created
+        
+    Returns:
+        The path to the downloaded file
+    """
+    import requests
+    import tempfile
+    
+    URL = "https://drive.google.com/uc?export=download"
+    
+    if not output_path:
+        # Create a temporary file with an appropriate extension
+        temp_file = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False)
+        output_path = temp_file.name
+        temp_file.close()
+    
+    # Use a session to handle cookies
+    session = requests.Session()
+    
+    # Initial request to get confirmation token if needed
+    response = session.get(URL, params={'id': file_id}, stream=True, 
+                          headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'})
+    
+    # Look for the download warning cookie that contains the token
+    token = None
+    for key, value in response.cookies.items():
+        if key.startswith('download_warning'):
+            token = value
+            break
+    
+    # If we found a token, we need a second request with the token
+    if token:
+        logging.info(f"Obtained confirmation token for Google Drive file {file_id}")
+        params = {'id': file_id, 'confirm': token}
+    else:
+        logging.info(f"No confirmation token needed for Google Drive file {file_id}")
+        params = {'id': file_id}
+    
+    # Download the file with appropriate parameters
+    response = session.get(URL, params=params, stream=True, 
+                          headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'})
+    
+    # Check if the response is valid
+    if response.status_code != 200:
+        error_msg = f"Failed to download file from Google Drive. Status code: {response.status_code}"
+        logging.error(error_msg)
+        raise HTTPException(status_code=400, detail=error_msg)
+    
+    # Check content type to ensure we're getting a file, not an HTML page
+    content_type = response.headers.get('Content-Type', '')
+    if 'text/html' in content_type:
+        logging.warning(f"Received HTML content instead of file. This might indicate access restrictions.")
+        # We could parse the HTML to extract a download link, but that's more complex
+    
+    # Write the file to disk
+    with open(output_path, 'wb') as f:
+        total_size = 0
+        for chunk in response.iter_content(chunk_size=8192):
+            if chunk:
+                f.write(chunk)
+                total_size += len(chunk)
+    
+    logging.info(f"Successfully downloaded Google Drive file {file_id} ({total_size} bytes) to {output_path}")
+    return output_path
+
 def validate_url(url):
     """Validate if the URL is well-formed and accessible."""
     # Check if URL is well-formed
     if not validators.url(url):
         raise HTTPException(status_code=400, detail="Invalid URL format")
     
-    # Try a HEAD request to check if the URL is accessible
+    # Special handling for Google Drive URLs
+    if 'drive.google.com' in url:
+        # Just do a basic validation for Google Drive URLs
+        file_id = None
+        file_match = re.search(r'/file/d/([^/]+)', url)
+        if file_match:
+            file_id = file_match.group(1)
+        else:
+            open_match = re.search(r'[?&]id=([^&]+)', url)
+            if open_match:
+                file_id = open_match.group(1)
+        
+        if not file_id:
+            raise HTTPException(status_code=400, detail="Invalid Google Drive URL format. Could not extract file ID.")
+        
+        return True
+    
+    # For non-Google Drive URLs, do the normal validation
     try:
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
@@ -295,23 +369,6 @@ def validate_url(url):
         raise HTTPException(status_code=400, detail=f"Error validating URL: {str(e)}")
     
     return True
-
-def convert_google_drive_url(drive_url: str) -> str:
-    """Convert a Google Drive sharing URL into a direct download URL."""
-    # Pattern for /file/d/FILE_ID/view
-    file_match = re.search(r'/file/d/([^/]+)', drive_url)
-    if file_match:
-        file_id = file_match.group(1)
-        return f"https://drive.google.com/uc?export=download&id={file_id}"
-    
-    # Pattern for open?id=FILE_ID
-    open_match = re.search(r'[?&]id=([^&]+)', drive_url)
-    if open_match:
-        file_id = open_match.group(1)
-        return f"https://drive.google.com/uc?export=download&id={file_id}"
-    
-    # Conversion failed
-    return ""
 
 # =============================================================================
 # Enhanced Audio Processor Class
@@ -1051,14 +1108,6 @@ async def upload_url(url: str = Form(...)):
     """Endpoint to process an audio file from a URL"""
     validate_url(url)
     
-    # Handle Google Drive URLs
-    if 'drive.google.com' in url:
-        converted_url = convert_google_drive_url(url)
-        if converted_url:
-            url = converted_url
-        else:
-            raise HTTPException(status_code=400, detail="Invalid Google Drive URL format.")
-    
     # Generate task ID and prepare for download
     task_id = str(uuid.uuid4())
     parsed_url = urlparse(url)
@@ -1070,16 +1119,43 @@ async def upload_url(url: str = Form(...)):
     filename = f"{task_id}{extension}"
     file_path = temp_uploads / filename
     
-    # Download the file from the URL
-    update_progress(task_id, 5, "Downloading audio from URL")
+    # Update progress to indicate download starting
+    update_progress(task_id, 5, "Starting download from URL")
+    
     try:
-        with requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, stream=True, timeout=30) as r:
-            r.raise_for_status()
-            with open(file_path, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-        update_progress(task_id, 25, "Download complete")
+        # Handle Google Drive URLs specifically
+        if 'drive.google.com' in url:
+            logging.info(f"Detected Google Drive URL: {url}")
+            
+            # Extract file ID from URL
+            file_id = None
+            file_match = re.search(r'/file/d/([^/]+)', url)
+            if file_match:
+                file_id = file_match.group(1)
+            else:
+                open_match = re.search(r'[?&]id=([^&]+)', url)
+                if open_match:
+                    file_id = open_match.group(1)
+            
+            if not file_id:
+                raise HTTPException(status_code=400, detail="Could not extract file ID from Google Drive URL")
+            
+            logging.info(f"Extracted Google Drive file ID: {file_id}")
+            update_progress(task_id, 10, "Downloading from Google Drive")
+            
+            # Use the special Google Drive download function
+            file_path = download_file_from_google_drive(file_id, str(file_path))
+            update_progress(task_id, 25, "Download complete")
+        else:
+            # For non-Google Drive URLs, use the regular download function
+            update_progress(task_id, 5, "Downloading audio from URL")
+            with requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, stream=True, timeout=60) as r:
+                r.raise_for_status()
+                with open(file_path, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+            update_progress(task_id, 25, "Download complete")
     except Exception as e:
         logging.error(f"Error downloading file from URL {url}: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Failed to download file: {str(e)}")
