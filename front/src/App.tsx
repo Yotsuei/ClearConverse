@@ -1,5 +1,4 @@
-// App.tsx - Cleaned version
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import FileUpload from './components/FileUpload';
 import UrlUpload from './components/UrlUpload';
 import AudioPlayer from './components/AudioPlayer';
@@ -37,9 +36,6 @@ const App: React.FC = () => {
   const [processingMessage, setProcessingMessage] = useState<string>('Preparing to process...');
   const [isWsConnected, setIsWsConnected] = useState(false);
   const [connectionAttempts, setConnectionAttempts] = useState(0);
-  
-  // References
-  const xhrRef = useRef<XMLHttpRequest | null>(null);
 
   // Fetch transcription when processing is complete
   useEffect(() => {
@@ -189,11 +185,6 @@ const App: React.FC = () => {
 
   // Cancel ongoing transcription
   const cancelTranscription = () => {
-    if (xhrRef.current) {
-      xhrRef.current.abort();
-      xhrRef.current = null;
-    }
-    
     setIsUploading(false);
     setUploadProgress(0);
     setIsProcessing(false);

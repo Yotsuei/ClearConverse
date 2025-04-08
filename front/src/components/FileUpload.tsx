@@ -1,4 +1,3 @@
-// components/FileUpload.tsx
 import React, { useState } from 'react';
 import config from '../config';
 
@@ -185,21 +184,6 @@ const FileUpload: React.FC<FileUploadProps> = ({
       setIsUploading(false);
       setUploadXhr(null);
     }
-  };
-
-  const handleCompleteReset = () => {
-    // Reset the file state
-    setFile(null);
-    setFileError(null);
-    
-    // Reset file input
-    const fileInput = document.getElementById('fileInput') as HTMLInputElement;
-    if (fileInput) {
-      fileInput.value = '';
-    }
-    
-    // Clear any transcription
-    clearTranscription();
   };
 
   return (

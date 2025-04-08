@@ -1,4 +1,3 @@
-// components/WebSocketProgressHandler.tsx
 import { useEffect, useRef } from 'react';
 import config from '../config';
 
@@ -11,7 +10,6 @@ interface WebSocketProgressHandlerProps {
   onConnectionFailed?: () => void;
   maxReconnectAttempts?: number;
 }
-
 
 const WebSocketProgressHandler: React.FC<WebSocketProgressHandlerProps> = ({ 
   taskId, 
@@ -29,6 +27,13 @@ const WebSocketProgressHandler: React.FC<WebSocketProgressHandlerProps> = ({
   // Function to establish WebSocket connection
   const connectWebSocket = () => {
     if (!taskId) return;
+
+    if (socketRef.current && 
+        (socketRef.current.readyState === WebSocket.CONNECTING || 
+        socketRef.current.readyState === WebSocket.OPEN)) {
+      return;
+    }
+
 
     // Clean up previous socket if exists
     if (socketRef.current && socketRef.current.readyState !== WebSocket.CLOSED) {

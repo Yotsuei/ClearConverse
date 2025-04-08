@@ -1,3 +1,5 @@
+# back/api.py
+
 import os
 import json
 import shutil
@@ -14,11 +16,11 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, Backgro
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-from datetime import datetime, timedelta
+from datetime import datetime
+from starlette.websockets import WebSocketDisconnect
 
 # Environment and scheduling
 from dotenv import load_dotenv
-from apscheduler.schedulers.background import BackgroundScheduler
 
 # Audio processing libs
 import torch
@@ -663,6 +665,119 @@ class EnhancedAudioProcessor:
             logging.error(f"Secondary diarization failed: {e}")
             return [(seg_start, seg_end, "UNKNOWN")]
 
+    def save_segments(self, segments: List[AudioSegment], output_dir: str):
+        output_dir = Path(output_dir)
+        regular_dir = output_dir / "regular_segments"
+        overlap_dir = output_dir / "overlap_segments"
+        regular_dir.mkdir(parents=True, exist_ok=True)
+        overlap_dir.mkdir(parents=True, exist_ok=True)
+        
+        for segment in segments:
+            timestamp = f"{segment.start:.2f}-{segment.end:.2f}"
+            if segment.is_overlap:
+                filename = f"overlap_{timestamp}_{segment.speaker_id}.wav"
+                save_path = overlap_dir / filename
+            else:
+                filename = f"{timestamp}_{segment.speaker_id}.wav"
+                save_path = regular_dir / filename
+            
+            torchaudio.save(str(save_path), segment.audio_tensor.cpu(), self.config.target_sample_rate)
+            logging.info(f"Saved segment: {save_path}")
+
+    def save_debug_segments(self, segments: List[AudioSegment], output_dir: str):
+        debug_dir = Path(output_dir) / "debug_segments"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        metadata = []
+        
+        for idx, segment in enumerate(segments):
+            segment_id = f"segment_{idx:03d}"
+            segment_type = "overlap" if segment.is_overlap else "regular"
+            segment_dir = debug_dir / segment_type
+            segment_dir.mkdir(exist_ok=True)
+            
+            audio_filename = f"{segment_id}.wav"
+            torchaudio.save(str(segment_dir / audio_filename), segment.audio_tensor.cpu(), self.config.target_sample_rate)
+            
+            segment_metadata = {
+                "segment_id": segment_id,
+                "start_time": f"{segment.start:.3f}",
+                "end_time": f"{segment.end:.3f}",
+                "duration": f"{segment.end - segment.start:.3f}",
+                "speaker_id": segment.speaker_id,
+                "is_overlap": segment.is_overlap,
+                "transcription": segment.transcription,
+                "audio_file": str(segment_dir / audio_filename),
+                "audio_stats": {
+                    "max_amplitude": float(torch.max(torch.abs(segment.audio_tensor)).cpu()),
+                    "mean_amplitude": float(torch.mean(torch.abs(segment.audio_tensor)).cpu()),
+                    "samples": segment.audio_tensor.shape[-1]
+                }
+            }
+            metadata.append(segment_metadata)
+            
+            with open(segment_dir / f"{segment_id}_info.txt", "w") as f:
+                f.write(f"Segment ID: {segment_id}\n")
+                f.write(f"Time: {segment.start:.3f}s - {segment.end:.3f}s\n")
+                f.write(f"Speaker: {segment.speaker_id}\n")
+                f.write(f"Overlap: {segment.is_overlap}\n")
+                f.write(f"Transcription: {segment.transcription}\n")
+        
+        with open(debug_dir / "segments_metadata.json", "w") as f:
+            json.dump(metadata, f, indent=2)
+            
+        logging.info(f"Debug segments saved to: {debug_dir}")
+        logging.info(f"Total segments: {len(segments)}")
+        logging.info(f"Overlap segments: {sum(1 for s in segments if s.is_overlap)}")
+        logging.info(f"Regular segments: {sum(1 for s in segments if not s.is_overlap)}")
+
+    def run(self, input_file, output_dir: str = "processed_audio", debug_mode: bool = False, progress_callback=None):
+        try:
+            if progress_callback:
+                progress_callback(5, "Starting processing")
+                
+            # Create output directory
+            os.makedirs(output_dir, exist_ok=True)
+            logging.info(f"Processing file: {input_file}")
+            
+            if progress_callback:
+                progress_callback(30, "Running file processing")
+                
+            # Process the audio file
+            results = self.process_file(input_file)
+            
+            if progress_callback:
+                progress_callback(60, "Saving processed segments")
+                
+            # Save the processed segments
+            self.save_segments(results['segments'], output_dir)
+            
+            if debug_mode:
+                self.save_debug_segments(results['segments'], output_dir)
+                
+            if progress_callback:
+                progress_callback(80, "Saving transcript")
+                
+            # Generate and save transcript
+            transcript_path = os.path.join(output_dir, "transcript.txt")
+            transcript = ""
+            for segment in results['segments']:
+                transcript += f"[{segment.speaker_id}] {segment.start:.2f}s - {segment.end:.2f}s\n"
+                transcript += f"{segment.transcription}\n\n"
+                
+            with open(transcript_path, "w", encoding='utf-8') as f:
+                f.write(transcript)
+                
+            logging.info(f"Transcript saved to: {transcript_path}")
+            
+            if progress_callback:
+                progress_callback(100, "Processing completed")
+                
+            return input_file, transcript, transcript_path
+        except Exception as e:
+            logging.error(f"Error during processing: {e}")
+            traceback.print_exc()
+            raise
+
     def process_file(self, file_path: str) -> Dict:
         try:
             audio, sample_rate = self.load_audio(file_path)
@@ -835,119 +950,6 @@ class EnhancedAudioProcessor:
             return {'segments': processed_segments, 'metadata': metadata}
         except Exception as e:
             logging.error(f"Error in process_file: {e}")
-            traceback.print_exc()
-            raise
-
-    def save_segments(self, segments: List[AudioSegment], output_dir: str):
-        output_dir = Path(output_dir)
-        regular_dir = output_dir / "regular_segments"
-        overlap_dir = output_dir / "overlap_segments"
-        regular_dir.mkdir(parents=True, exist_ok=True)
-        overlap_dir.mkdir(parents=True, exist_ok=True)
-        
-        for segment in segments:
-            timestamp = f"{segment.start:.2f}-{segment.end:.2f}"
-            if segment.is_overlap:
-                filename = f"overlap_{timestamp}_{segment.speaker_id}.wav"
-                save_path = overlap_dir / filename
-            else:
-                filename = f"{timestamp}_{segment.speaker_id}.wav"
-                save_path = regular_dir / filename
-            
-            torchaudio.save(str(save_path), segment.audio_tensor.cpu(), self.config.target_sample_rate)
-            logging.info(f"Saved segment: {save_path}")
-
-    def save_debug_segments(self, segments: List[AudioSegment], output_dir: str):
-        debug_dir = Path(output_dir) / "debug_segments"
-        debug_dir.mkdir(parents=True, exist_ok=True)
-        metadata = []
-        
-        for idx, segment in enumerate(segments):
-            segment_id = f"segment_{idx:03d}"
-            segment_type = "overlap" if segment.is_overlap else "regular"
-            segment_dir = debug_dir / segment_type
-            segment_dir.mkdir(exist_ok=True)
-            
-            audio_filename = f"{segment_id}.wav"
-            torchaudio.save(str(segment_dir / audio_filename), segment.audio_tensor.cpu(), self.config.target_sample_rate)
-            
-            segment_metadata = {
-                "segment_id": segment_id,
-                "start_time": f"{segment.start:.3f}",
-                "end_time": f"{segment.end:.3f}",
-                "duration": f"{segment.end - segment.start:.3f}",
-                "speaker_id": segment.speaker_id,
-                "is_overlap": segment.is_overlap,
-                "transcription": segment.transcription,
-                "audio_file": str(segment_dir / audio_filename),
-                "audio_stats": {
-                    "max_amplitude": float(torch.max(torch.abs(segment.audio_tensor)).cpu()),
-                    "mean_amplitude": float(torch.mean(torch.abs(segment.audio_tensor)).cpu()),
-                    "samples": segment.audio_tensor.shape[-1]
-                }
-            }
-            metadata.append(segment_metadata)
-            
-            with open(segment_dir / f"{segment_id}_info.txt", "w") as f:
-                f.write(f"Segment ID: {segment_id}\n")
-                f.write(f"Time: {segment.start:.3f}s - {segment.end:.3f}s\n")
-                f.write(f"Speaker: {segment.speaker_id}\n")
-                f.write(f"Overlap: {segment.is_overlap}\n")
-                f.write(f"Transcription: {segment.transcription}\n")
-        
-        with open(debug_dir / "segments_metadata.json", "w") as f:
-            json.dump(metadata, f, indent=2)
-            
-        logging.info(f"Debug segments saved to: {debug_dir}")
-        logging.info(f"Total segments: {len(segments)}")
-        logging.info(f"Overlap segments: {sum(1 for s in segments if s.is_overlap)}")
-        logging.info(f"Regular segments: {sum(1 for s in segments if not s.is_overlap)}")
-
-    def run(self, input_file, output_dir: str = "processed_audio", debug_mode: bool = False, progress_callback=None):
-        try:
-            if progress_callback:
-                progress_callback(5, "Starting processing")
-                
-            # Create output directory
-            os.makedirs(output_dir, exist_ok=True)
-            logging.info(f"Processing file: {input_file}")
-            
-            if progress_callback:
-                progress_callback(30, "Running file processing")
-                
-            # Process the audio file
-            results = self.process_file(input_file)
-            
-            if progress_callback:
-                progress_callback(60, "Saving processed segments")
-                
-            # Save the processed segments
-            self.save_segments(results['segments'], output_dir)
-            
-            if debug_mode:
-                self.save_debug_segments(results['segments'], output_dir)
-                
-            if progress_callback:
-                progress_callback(80, "Saving transcript")
-                
-            # Generate and save transcript
-            transcript_path = os.path.join(output_dir, "transcript.txt")
-            transcript = ""
-            for segment in results['segments']:
-                transcript += f"[{segment.speaker_id}] {segment.start:.2f}s - {segment.end:.2f}s\n"
-                transcript += f"{segment.transcription}\n\n"
-                
-            with open(transcript_path, "w", encoding='utf-8') as f:
-                f.write(transcript)
-                
-            logging.info(f"Transcript saved to: {transcript_path}")
-            
-            if progress_callback:
-                progress_callback(100, "Processing completed")
-                
-            return input_file, transcript, transcript_path
-        except Exception as e:
-            logging.error(f"Error during processing: {e}")
             traceback.print_exc()
             raise
 
@@ -1134,31 +1136,51 @@ async def get_task_result(task_id: str):
         
     return JSONResponse(content=result_store[task_id])
 
+from starlette.websockets import WebSocketDisconnect
+
 @app.websocket("/ws/progress/{task_id}")
 async def progress_ws(websocket: WebSocket, task_id: str):
     """WebSocket endpoint for real-time progress updates"""
     await websocket.accept()
+    
     try:
+        # Get current progress data
+        current_data = progress_store.get(task_id, {"progress": 0, "message": "Initializing..."})
+        
+        # Send initial data
+        await websocket.send_json(current_data)
+        
+        # Exit early if task is already completed
+        if current_data.get("progress", 0) >= 100:
+            return
+        
+        # Poll for updates
         while True:
-            # Initial connection acknowledgement
-            await websocket.send_json({"status": "connected"})
+            await asyncio.sleep(0.5)
             
-            # Send current progress
-            data = progress_store.get(task_id, {"progress": 0, "message": "Initializing..."})
-            await websocket.send_json(data)
+            new_data = progress_store.get(task_id, current_data)
             
-            # Exit loop if process is complete
-            if data.get("progress", 0) >= 100:
+            # Send update only if data changed
+            if new_data != current_data:
+                try:
+                    await websocket.send_json(new_data)
+                    current_data = new_data
+                except RuntimeError:
+                    # Connection was closed while we were sending
+                    break
+            
+            # Stop polling once task is complete
+            if new_data.get("progress", 0) >= 100:
                 break
                 
-            await asyncio.sleep(0.5)  # Update frequency
+    except WebSocketDisconnect:
+        # Client disconnected, just log at debug level since this is normal
+        logging.debug(f"WebSocket client disconnected for task {task_id}")
     except Exception as e:
-        logging.error(f"WebSocket error for task {task_id}: {e}")
+        # Log other errors but don't crash
+        logging.error(f"WebSocket error for task {task_id}: {str(e)}")
     finally:
-        try:
-            await websocket.close()
-        except RuntimeError as e:
-            logging.info(f"WebSocket for task {task_id} already closed: {e}")
+        pass
 
 @app.get("/download/{file_path:path}")
 async def download_transcript(file_path: str):
