@@ -1,4 +1,3 @@
-// components/TranscriptionDisplay.tsx
 import React, { useState } from 'react';
 import config from '../config';
 
@@ -15,6 +14,7 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
   onClear,
   onReset
 }) => {
+  // State for expanded view toggle
   const [expanded, setExpanded] = useState(false);
   const [copySuccess, setCopySuccess] = useState<string | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState<string | null>(null);
@@ -261,12 +261,12 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
       <div className="mt-6 bg-gray-750 p-4 rounded-lg border border-gray-700">
         <h3 className="text-lg font-semibold mb-2 text-gray-200">About This Transcription</h3>
         <p className="text-gray-400 text-sm">
-          This transcription was generated using advanced speech recognition technology. 
+          This transcription was generated using a fine-tuned Whisper-RESepFormer solution. 
           {speakerATurns > 0 && speakerBTurns > 0 ? 
             " Speaker diarization was applied to identify different speakers in the conversation." : 
             " The audio appears to have a single speaker."}
           {duration !== "N/A" ? 
-            ` Total audio duration was approximately ${duration} seconds.` : 
+            ` Average speech segments were approximately ${duration} seconds.` : 
             ""}
         </p>
       </div>

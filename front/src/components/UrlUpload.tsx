@@ -1,4 +1,3 @@
-// components/UrlUpload.tsx
 import React, { useState } from 'react';
 import config from '../config';
 
@@ -84,6 +83,9 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
     setIsUploading(true);
     setUploadProgress(0);
     
+    // Clear any previous transcription
+    clearTranscription();
+    
     // Create form data with the URL
     const formData = new FormData();
     formData.append('url', url);  
@@ -118,8 +120,9 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
           
           if (response.task_id) {
             console.log('URL uploaded. Task ID:', response.task_id);  
+            setTaskId(response.task_id);
             
-            // Modified: Use the preview URL from backend response
+            // Use the preview URL from backend response
             if (response.preview_url) {
               onUploadSuccess(response.preview_url, response.task_id);
             }  
@@ -163,7 +166,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
         pastedText.includes('drive.google.com') || 
         pastedText.includes('storage.googleapis.com') ||
         pastedText.endsWith('.mp3') ||
-        pastedText.endsWith('.wav')
+        pastedText.endsWith('.wav');
         
       if (isAudioVideo) {
         setIsValidUrl(true);
@@ -257,7 +260,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
               : 'bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg'}`
           }
         >
-          Google Drive URL Upload
+          Process URL
         </button>
       ) : (
         <button
