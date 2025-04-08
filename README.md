@@ -21,7 +21,6 @@ Before you begin, ensure you have the following installed:
 - [Python](https://www.python.org/downloads/) (3.9 or higher)
 - [Node.js](https://nodejs.org/) (16.x or higher)
 - [npm](https://www.npmjs.com/get-npm) (usually included with Node.js)
-- [ffmpeg](https://ffmpeg.org/download.html) (required for audio processing)
 
 You'll also need a Hugging Face account and API token for accessing the required AI models.
 
