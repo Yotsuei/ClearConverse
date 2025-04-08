@@ -13,13 +13,14 @@
 
 # Backend specific
 back/.env
-back/.env.*
+back/.env.development
+back/.env.test
+back/.env.production
 back/.env.local
 back/.env.*.local
 
 # Frontend specific
 front/.env
-front/.env.*
 front/.env.local
 front/.env.*.local
 front/.env.development
