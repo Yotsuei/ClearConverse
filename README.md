@@ -6,20 +6,28 @@ ClearConverse is a speech transcription tool powered by Whisper-RESepFormer solu
 
 ## Features
 
-- Upload audio files for transcription
-- Process audio from Google Drive URLs
-- Accurate speaker diarization (speaker identification)
-- Handle overlapping speech
-- Clean audio preview
-- Downloadable and copyable transcription results
-- Speaker-separated transcripts
+- **Multiple Audio Source Options**:
+  - Upload audio files for transcription
+  - Process audio from Google Drive URLs
+- **Advanced Speech Processing**:
+  - Accurate speaker diarization (speaker identification)
+  - Overlapping speech detection and separation
+  - Enhanced audio processing with noise reduction
+- **User-Friendly Interface**:
+  - Audio preview with playback controls
+  - Real-time processing status via WebSockets
+  - Speaker-separated transcript display
+- **Versatile Output Options**:
+  - Downloadable transcription results
+  - Copy-to-clipboard functionality
+  - Detailed audio statistics
 
 ## Prerequisites
 
 Before you begin, ensure you have the following installed:
 - [Git](https://git-scm.com/downloads)
-- [Python](https://www.python.org/downloads/) (3.9 or higher)
-- [Node.js](https://nodejs.org/) (16.x or higher)
+- [Python](https://www.python.org/downloads/) (3.12 or higher)
+- [Node.js](https://nodejs.org/) (18.x or higher)
 - [npm](https://www.npmjs.com/get-npm) (usually included with Node.js)
 - [Docker](https://www.docker.com/products/docker-desktop/) (optional, for containerized deployment)
 - [FFmpeg](https://ffmpeg.org/download.html) (required for audio processing)
@@ -28,35 +36,57 @@ You'll also need a Hugging Face account and API token for accessing the required
 
 ## Models
 
-This project uses speech recognition and separation models to process audio:
+This project uses multiple AI models to process audio:
 
-### Local Fine-tuned Models
+### Speech Processing Models
 
-For our specific research implementation, we use:
-- Custom fine-tuned Whisper model for transcription
-- Custom fine-tuned RESepFormer model for speech separation
+- **Whisper**: For speech recognition and transcription
+- **RESepFormer**: For speech separation in overlapping speech segments
+- **PyAnnote**: For speaker diarization, voice activity detection, and speaker embeddings
 
-These fine-tuned models are stored locally and are not included in this repository.
+### Local Fine-tuned Models (Optional)
 
-### Using Your Own Models
-
-You can use your own fine-tuned versions of these models by:
-1. Placing your model files in the `back/models/` directory
-2. Updating the model paths in the backend configuration
+For our specific research implementation, you can use custom fine-tuned models:
+- Place your fine-tuned Whisper model in `back/models/whisper-ft/`
+- Place your fine-tuned RESepFormer model in `back/models/resepformer-ft/`
 
 ### Fallback to Pre-trained Models
 
-If no custom models are provided, the application will automatically download and use the pre-trained versions of:
-- Whisper from OpenAI
-- RESepFormer from SpeechBrain
+If no custom models are provided, the application will automatically download and use the pre-trained versions from:
+- OpenAI (Whisper small.en model)
+- SpeechBrain (RESepFormer base model)
+- PyAnnote (Diarization and VAD models)
 
 Note that performance may vary depending on which models are used.
 
 ## Getting Started
 
-### Quick Setup (Development)
+### Quick Setup (Using Docker)
 
-For a quick development setup, you can use our setup script:
+For a quick setup using Docker:
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/clearconverse.git
+cd clearconverse
+
+# Create necessary directories
+mkdir -p back/models back/processed_audio back/temp_uploads
+
+# Create environment files
+# Edit these files to set your Hugging Face token
+cp .env.example .env.development
+cp .env.example .env.production
+
+# Start the development environment
+./deploy.sh development
+```
+
+For more details about the Docker setup, refer to the [Docker Setup Documentation](Docker-Setup.md).
+
+### Manual Development Setup
+
+If you prefer to set up the environment manually:
 
 ```bash
 # Make the script executable
@@ -66,7 +96,7 @@ chmod +x dev-setup.sh
 ./dev-setup.sh
 ```
 
-This will:
+This script will:
 1. Create necessary directories
 2. Set up environment files
 3. Create a Python virtual environment
@@ -75,16 +105,9 @@ This will:
 
 After running the script, follow the displayed instructions to start the backend and frontend servers.
 
-### Clone the Repository
+### Backend Setup (Manual)
 
-```bash
-git clone https://github.com/yourusername/clearconverse.git
-cd clearconverse
-```
-
-### Backend Setup
-
-1. **Create Environment Files**
+1. **Create Environment File**
 
 Create a file named `.env.development` in the `back` directory with the following content:
 
@@ -125,9 +148,9 @@ This may take a while as it downloads several AI models and libraries.
 mkdir -p models processed_audio temp_uploads
 ```
 
-### Frontend Setup
+### Frontend Setup (Manual)
 
-1. **Create Environment Files**
+1. **Create Environment File**
 
 Create a file named `.env.development` in the `front` directory with the following content:
 
@@ -143,7 +166,7 @@ cd front
 npm install
 ```
 
-## Running the Application
+## Running the Application (Manual)
 
 ### Start the Backend Server
 
@@ -166,83 +189,66 @@ cd front
 npm run dev
 ```
 
-This will start the development server, typically on port 3000.
+This will start the development server, typically on port 5173.
 
-Open your browser and navigate to [http://localhost:3000](http://localhost:3000) to use the application.
-
-## Docker Deployment
-
-For easier deployment, you can use Docker:
-
-### Using Docker Compose
-
-1. Create appropriate environment files:
-   - `.env.development` for development
-   - `.env.production` for production
-
-2. Run the deployment script:
-
-```bash
-# For development
-./deploy.sh development
-
-# For production
-./deploy.sh
-```
-
-3. Access the application:
-   - Frontend: http://localhost:3000 (dev) or http://localhost:80 (prod)
-   - Backend: http://localhost:8000
-
-4. To stop and clean up:
-
-```bash
-./cleanup.sh
-```
-
-For more details about the Docker setup, refer to the [Docker Setup Documentation](docker-docs.md).
+Open your browser and navigate to [http://localhost:5173](http://localhost:5173) to use the application.
 
 ## Using ClearConverse
 
-1. **Upload Audio**
-   - Use the File Upload option to upload local audio/video files
+1. **Select Audio Source**
+   - Choose between File Upload or Google Drive URL
+   - For File Upload: Upload local audio/video files
+   - For Google Drive: Provide a shareable link to your audio file
+
+2. **File Formats**
    - Supported formats: WAV, MP3, MP4, OGG, FLAC, M4A, AAC
    - For best results, use WAV or MP3 files
 
-2. **Process Google Drive URL**
-   - Alternatively, use the Google Drive URL option to process audio from a shared link
-   - Make sure the Google Drive link is publicly accessible
-
 3. **Start Transcription**
    - Once your audio is uploaded, click "Start Transcription"
-   - The system will process the audio, separating speakers and transcribing content
-   - This may take some time depending on the length of the audio
+   - The system will process the audio using WebSocket for real-time progress updates
+   - Processing steps include:
+     - Building speaker profiles
+     - Detecting speech segments
+     - Processing overlapping speech
+     - Generating transcription
 
 4. **View and Download Results**
    - When processing is complete, you'll see the transcription with speakers labeled
-   - You can download the transcript as a text file
-   - Copy to clipboard option is also available
+   - Speakers are distinguished by color (SPEAKER_A, SPEAKER_B)
+   - Statistics show word count, duration, and speaker turns
+   - You can:
+     - Download the transcript as a text file
+     - Copy to clipboard
+     - Clear transcription to process another file
 
 ## Troubleshooting
 
 ### Common Issues
 
 1. **Models fail to download**
-   - Check your Hugging Face token is correct
+   - Check your Hugging Face token is correct in your environment files
    - Ensure you have internet connectivity
    - Try running with elevated permissions if necessary
 
 2. **Audio processing fails**
    - Verify ffmpeg is installed and in your PATH
    - Check that your audio file is not corrupted
-   - Try a different audio format
+   - Try a different audio format (WAV or MP3 recommended)
 
 3. **WebSocket connection fails**
    - Ensure your backend is running
    - Check browser console for CORS errors
    - Verify the VITE_WS_BASE_URL in your frontend .env file
+   - The system will automatically fall back to polling if WebSockets fail
 
-4. **Frontend displays only background**
+4. **Backend fails to start**
+   - Check if port 8000 is already in use
+   - Ensure all dependencies are installed
+   - Verify your Python version (3.12 or higher required)
+   - Check for error messages in the console
+
+5. **Frontend displays only background**
    - Check browser console for errors
    - Verify all dependencies are installed
    - Make sure environment variables are correctly set
@@ -252,7 +258,8 @@ For more details about the Docker setup, refer to the [Docker Setup Documentatio
 If you encounter issues not covered here, please:
 1. Check the console logs in both frontend and backend
 2. Look for error messages in the browser developer tools
-3. File an issue in the project repository with detailed information
+3. Use the health endpoint to verify backend is running: http://localhost:8000/health
+4. File an issue in the project repository with detailed information
 
 ## License
 

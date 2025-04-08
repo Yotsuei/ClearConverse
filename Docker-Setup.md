@@ -9,6 +9,14 @@ ClearConverse supports two environments:
 1. **Development**: Optimized for active development with hot-reloading, mounted source code, and developer tools
 2. **Production**: Optimized for performance and stability with built assets and production-ready configurations
 
+## Prerequisites
+
+Before using Docker to run ClearConverse, ensure you have:
+
+- [Docker](https://www.docker.com/products/docker-desktop/) installed and running
+- [Git](https://git-scm.com/downloads) to clone the repository
+- Hugging Face account and API token for accessing the required AI models
+
 ## Configuration Files
 
 Each environment uses separate configuration files:
@@ -19,17 +27,58 @@ Each environment uses separate configuration files:
 
 - **Dockerfiles**:
   - Backend:
-    - `back/Dockerfile.dev`: Development configuration with live reloading
-    - `back/Dockerfile.prod`: Production configuration with optimized build
+    - `back/Dockerfile.dev`: Development configuration with live reloading (Python 3.12)
+    - `back/Dockerfile.prod`: Production configuration with optimized build (Python 3.12)
   - Frontend:
-    - `front/Dockerfile.dev`: Development configuration with Vite dev server
-    - `front/Dockerfile.prod`: Production configuration with Nginx
+    - `front/Dockerfile.dev`: Development configuration with Vite dev server (Node.js 18)
+    - `front/Dockerfile.prod`: Production configuration with Nginx (Node.js 18)
 
 - **Environment Variables**:
   - `.env.development`: Variables for development environment
   - `.env.production`: Variables for production environment
 
+## Directory Structure
+
+The Docker configuration relies on specific directories:
+
+```
+clearconverse/
+├── back/
+│   ├── models/             # Storage for AI models
+│   ├── processed_audio/    # Processed audio files
+│   ├── temp_uploads/       # Temporary storage for uploaded files
+│   ├── Dockerfile.dev
+│   ├── Dockerfile.prod
+│   └── ...
+├── front/
+│   ├── Dockerfile.dev
+│   ├── Dockerfile.prod
+│   ├── nginx.conf         # Nginx configuration for production
+│   └── ...
+├── docker-compose.dev.yml
+├── docker-compose.yml
+├── deploy.sh
+└── cleanup.sh
+```
+
+## Environment Variables
+
+The following environment variables are used by the Docker setup:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `API_HOST` | Backend host | http://localhost |
+| `API_PORT` | Backend port | 8000 |
+| `CORS_ORIGINS` | Allowed CORS origins | * |
+| `MODEL_CACHE_DIR` | Directory for model storage | models |
+| `HF_AUTH_TOKEN` | Hugging Face authentication token | (required) |
+| `VITE_API_BASE_URL` | Frontend API base URL | http://localhost:8000 |
+| `VITE_WS_BASE_URL` | Frontend WebSocket base URL | ws://localhost:8000 |
+| `FRONTEND_PORT` | Frontend port | 3000 (dev) / 80 (prod) |
+
 ## Starting the Application
+
+The project includes a deployment script that handles environment selection and startup:
 
 ### Development Environment
 
@@ -73,6 +122,13 @@ In production mode:
 - Backend API will be available at http://localhost:8000
 - Containers are optimized for performance and stability
 
+## Health Checks
+
+Both development and production configurations include health checks:
+
+- Backend: Exposes a `/health` endpoint checked by Docker
+- Frontend (Production): Nginx health check verified by Docker
+
 ## Key Differences Between Environments
 
 | Feature | Development | Production |
@@ -83,6 +139,7 @@ In production mode:
 | Performance | Optimized for development | Optimized for production |
 | Environment Variables | .env.development | .env.production |
 | Ports | Frontend: 3000, Backend: 8000 | Frontend: 80, Backend: 8000 |
+| Health Checks | 10s interval, 3 retries | 30s interval, 3 retries |
 
 ## Viewing Logs
 
@@ -94,6 +151,10 @@ docker-compose -f docker-compose.dev.yml logs -f
 
 # Production
 docker-compose logs -f
+
+# View logs for a specific service
+docker-compose -f docker-compose.dev.yml logs -f backend
+docker-compose -f docker-compose.dev.yml logs -f frontend
 ```
 
 ## Stopping the Application
@@ -104,7 +165,9 @@ To stop the application and clean up resources:
 ./cleanup.sh
 ```
 
-This script will stop all containers and provide an option to clean up temporary files.
+This script will:
+1. Stop all containers
+2. Optionally provide an option to clean up temporary files (uncomment in the script to enable)
 
 ## Customizing Environment Variables
 
@@ -125,6 +188,23 @@ docker-compose down
 ./deploy.sh production
 ```
 
+## Storage Volumes
+
+The following volumes are shared between the host and containers:
+
+### Development:
+- `./back:/app`: Full backend source code for hot-reloading
+- `./back/models:/app/models`: AI models
+- `./back/processed_audio:/app/processed_audio`: Processed audio files
+- `./back/temp_uploads:/app/temp_uploads`: Temporary uploads
+- `./front:/app`: Frontend source code for hot-reloading
+- `/app/node_modules`: Node modules (not shared with host)
+
+### Production:
+- `./back/models:/app/models`: AI models
+- `./back/processed_audio:/app/processed_audio`: Processed audio files
+- `./back/temp_uploads:/app/temp_uploads`: Temporary uploads
+
 ## Troubleshooting
 
 If you encounter issues:
@@ -144,8 +224,14 @@ If you encounter issues:
    mkdir -p back/models back/processed_audio back/temp_uploads
    ```
 
-4. For frontend TypeScript errors, you may need to update dependencies:
+4. Check container health status:
    ```bash
-   cd front
-   npm install --save-dev @types/node
+   docker-compose -f docker-compose.dev.yml ps
    ```
+
+5. For frontend errors, check the Vite dev server or Nginx logs:
+   ```bash
+   docker-compose -f docker-compose.dev.yml logs -f frontend
+   ```
+
+6. Ensure your Hugging Face token is correctly set in the environment files
