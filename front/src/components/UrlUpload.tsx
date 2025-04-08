@@ -35,7 +35,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
         // Check if it's a valid URL format
         new URL(inputUrl);
         
-        // Check if it's a valid audio/video URL
+        // Check if it's a valid audio URL
         const isAudioVideo = 
           inputUrl.includes('drive.google.com') || 
           inputUrl.includes('docs.google.com') || 
@@ -52,7 +52,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
           setIsValidUrl(true);
         } else {
           setIsValidUrl(false);
-          setUrlError('Please enter a valid audio/video URL');
+          setUrlError('Please enter a valid audio URL from Google Drive');
         }
       } catch (e) {
         setIsValidUrl(false);
@@ -76,7 +76,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
 
   const handleUpload = async () => {
     if (!url || !isValidUrl) {
-      setUrlError('Please enter a valid audio/video URL');
+      setUrlError('Please enter a valid audio URL from Google Drive');
       return;
     }
     
@@ -173,7 +173,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
         setUrlError(null);
       } else {
         setIsValidUrl(false);
-        setUrlError('Please enter a valid audio/video URL');
+        setUrlError('Please enter a valid audio URL from Google Drive');
       }
     } catch (e) {
       setIsValidUrl(false);
@@ -191,7 +191,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
     <div className="flex flex-col">
       <div className="mb-4">
         <label htmlFor="audio-url" className="block text-sm font-medium text-gray-300 mb-1">
-          Audio/Video URL
+          Google Drive Audio URL
         </label>
         <div className="relative">
           <input
@@ -239,7 +239,7 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
             <div className="mt-2 text-sm text-gray-400">
               <ul className="list-disc pl-5 space-y-1">
                 <li>Direct links to MP3 or WAV files</li>
-                <li>Google Drive shared audio/video files</li>
+                <li>Google Drive shared audio files</li>
               </ul>
             </div>
             <p className="mt-2 text-xs text-gray-400">
