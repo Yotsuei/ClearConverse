@@ -16,7 +16,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, Backgro
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-from datetime import datetime
+from datetime import datetime, timedelta
 from starlette.websockets import WebSocketDisconnect
 
 # Environment and scheduling
@@ -1019,6 +1019,75 @@ app = FastAPI(
     description="Transcription solution mainly powered by Whisper-RESepFormer solution. Supported by PyAnnote's Speaker Diarization, Voice Activity Detection, and Embeddings"
 )
 
+# Define a cleanup task that runs in the background
+async def cleanup_old_files(max_age_hours=1):
+    """
+    Periodically clean up old temporary files and processed audio directories
+    that are older than the specified age in hours.
+    
+    Args:
+        max_age_hours: Maximum age of files in hours before they're deleted
+    """
+    while True:
+        try:
+            logging.info(f"Running scheduled cleanup of files older than {max_age_hours} hours")
+            
+            # Calculate cutoff time
+            cutoff_time = datetime.now() - timedelta(hours=max_age_hours)
+            files_removed = 0
+            dirs_removed = 0
+            
+            # Clean temporary upload files
+            for file_path in Path("temp_uploads").glob("*"):
+                if file_path.is_file():
+                    # Get the modification time of the file
+                    mod_time = datetime.fromtimestamp(file_path.stat().st_mtime)
+                    if mod_time < cutoff_time:
+                        try:
+                            file_path.unlink()
+                            files_removed += 1
+                        except Exception as e:
+                            logging.error(f"Failed to remove temp file {file_path}: {e}")
+            
+            # Clean processed audio directories
+            for dir_path in Path(OUTPUT_DIR).glob("*"):
+                if dir_path.is_dir():
+                    # Get the modification time of the directory
+                    try:
+                        # Use the most recent file in the directory to determine age
+                        most_recent = max(
+                            [f.stat().st_mtime for f in dir_path.glob("**/*") if f.is_file()], 
+                            default=dir_path.stat().st_mtime
+                        )
+                        mod_time = datetime.fromtimestamp(most_recent)
+                        
+                        if mod_time < cutoff_time:
+                            shutil.rmtree(dir_path)
+                            dirs_removed += 1
+                    except Exception as e:
+                        logging.error(f"Failed to remove directory {dir_path}: {e}")
+            
+            logging.info(f"Cleanup completed: removed {files_removed} files and {dirs_removed} directories")
+            
+            # Wait for the next cleanup interval (1 hour)
+            await asyncio.sleep(60 * 60)  # Sleep for 1 hour
+            
+        except Exception as e:
+            logging.error(f"Error in cleanup task: {e}")
+            # If there's an error, wait a bit and try again
+            await asyncio.sleep(60)  # Sleep for 1 minute before retrying
+
+# Add this function to start the background task
+def start_cleanup_task(app):
+    """Start the background cleanup task when the app starts"""
+    @app.on_event("startup")
+    async def start_scheduler():
+        # Start the cleanup task in the background
+        asyncio.create_task(cleanup_old_files())
+        logging.info("Started scheduled cleanup task (running every hour)")
+
+start_cleanup_task(app)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=env_config['cors_origins'],
@@ -1293,6 +1362,54 @@ async def cleanup(task_id: str):
         logging.info(f"No temp files found for task {task_id}")
         
     return JSONResponse(content={"status": f"Cleaned up files for task {task_id}"})
+
+# Add this endpoint to your FastAPI app
+@app.post("/admin/cleanup")
+async def manual_cleanup(hours: int = 1):
+    """Manually trigger cleanup of files older than the specified hours"""
+    try:
+        # Calculate cutoff time
+        cutoff_time = datetime.now() - timedelta(hours=hours)
+        files_removed = 0
+        dirs_removed = 0
+        
+        # Clean temporary upload files
+        for file_path in Path("temp_uploads").glob("*"):
+            if file_path.is_file():
+                # Get the modification time of the file
+                mod_time = datetime.fromtimestamp(file_path.stat().st_mtime)
+                if mod_time < cutoff_time:
+                    try:
+                        file_path.unlink()
+                        files_removed += 1
+                    except Exception as e:
+                        logging.error(f"Failed to remove temp file {file_path}: {e}")
+        
+        # Clean processed audio directories
+        for dir_path in Path(OUTPUT_DIR).glob("*"):
+            if dir_path.is_dir():
+                # Get the modification time of the directory
+                try:
+                    # Use the most recent file in the directory to determine age
+                    most_recent = max(
+                        [f.stat().st_mtime for f in dir_path.glob("**/*") if f.is_file()], 
+                        default=dir_path.stat().st_mtime
+                    )
+                    mod_time = datetime.fromtimestamp(most_recent)
+                    
+                    if mod_time < cutoff_time:
+                        shutil.rmtree(dir_path)
+                        dirs_removed += 1
+                except Exception as e:
+                    logging.error(f"Failed to remove directory {dir_path}: {e}")
+        
+        return JSONResponse(content={
+            "status": "success", 
+            "message": f"Removed {files_removed} files and {dirs_removed} directories older than {hours} hours"
+        })
+    except Exception as e:
+        logging.error(f"Error in manual cleanup: {e}")
+        raise HTTPException(status_code=500, detail=f"Cleanup failed: {str(e)}")
 
 @app.get("/health")
 def health_check():
