@@ -20,6 +20,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
   const [dragActive, setDragActive] = useState(false);
   const [uploadXhr, setUploadXhr] = useState<XMLHttpRequest | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [fileName, setFileName] = useState<string | null>(null);
 
   // Validate file type - prioritizing WAV and MP3 formats (most compatible)
   const isValidFileType = (file: File): boolean => {
@@ -72,11 +73,13 @@ const FileUpload: React.FC<FileUploadProps> = ({
       if (!isValidFileType(selectedFile)) {
         setFileError('Invalid file type. Please use .wav or .mp3 files for best results.');
         setFile(null);
+        setFileName(null);
         return;
       }
       
       setFileError(null);
       setFile(selectedFile);
+      setFileName(selectedFile.name);
     }
   };
 
@@ -104,11 +107,13 @@ const FileUpload: React.FC<FileUploadProps> = ({
       if (!isValidFileType(droppedFile)) {
         setFileError('Invalid file type. Please use .wav or .mp3 files for best results.');
         setFile(null);
+        setFileName(null);
         return;
       }
       
       setFileError(null);
       setFile(droppedFile);
+      setFileName(droppedFile.name);
     }
   };
 
@@ -159,6 +164,8 @@ const FileUpload: React.FC<FileUploadProps> = ({
           if (response.task_id && response.preview_url) {
             console.log('File uploaded. Task ID:', response.task_id);
             setTaskId(response.task_id);
+            // Reset file name as we'll show the audio player instead
+            setFileName(null);
             onUploadSuccess(response.preview_url, response.task_id);
           } else {
             throw new Error('No task ID returned from server');
@@ -192,6 +199,36 @@ const FileUpload: React.FC<FileUploadProps> = ({
       <p className="text-gray-400 mb-6 text-center">
         Upload your audio or video file for transcription. WAV and MP3 formats are recommended for best results.
       </p>
+      
+      {/* File name display area */}
+      {fileName && (
+        <div className="w-full bg-gray-700 border border-gray-600 rounded-lg p-4 mb-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <svg className="h-6 w-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path>
+              </svg>
+              <div>
+                <p className="text-sm font-medium text-gray-200 truncate max-w-xs">{fileName}</p>
+                <p className="text-xs text-gray-400">
+                  {file?.size ? `${(file.size / (1024 * 1024)).toFixed(2)} MB` : ''}
+                </p>
+              </div>
+            </div>
+            <button 
+              onClick={() => {
+                setFile(null);
+                setFileName(null);
+              }}
+              className="text-gray-400 hover:text-gray-300"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
       
       <div 
         className={`w-full border-2 border-dashed rounded-lg p-6 mb-4 cursor-pointer text-center transition-colors
