@@ -20,6 +20,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
   const [dragActive, setDragActive] = useState(false);
   const [uploadXhr, setUploadXhr] = useState<XMLHttpRequest | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [fileName, setFileName] = useState<string | null>(null);
 
   // Validate file type - prioritizing WAV and MP3 formats (most compatible)
   const isValidFileType = (file: File): boolean => {
@@ -72,11 +73,13 @@ const FileUpload: React.FC<FileUploadProps> = ({
       if (!isValidFileType(selectedFile)) {
         setFileError('Invalid file type. Please use .wav or .mp3 files for best results.');
         setFile(null);
+        setFileName(null);
         return;
       }
       
       setFileError(null);
       setFile(selectedFile);
+      setFileName(selectedFile.name);
     }
   };
 
@@ -104,11 +107,13 @@ const FileUpload: React.FC<FileUploadProps> = ({
       if (!isValidFileType(droppedFile)) {
         setFileError('Invalid file type. Please use .wav or .mp3 files for best results.');
         setFile(null);
+        setFileName(null);
         return;
       }
       
       setFileError(null);
       setFile(droppedFile);
+      setFileName(droppedFile.name);
     }
   };
 
@@ -159,6 +164,11 @@ const FileUpload: React.FC<FileUploadProps> = ({
           if (response.task_id && response.preview_url) {
             console.log('File uploaded. Task ID:', response.task_id);
             setTaskId(response.task_id);
+            
+            // Reset file and file name as we'll show the audio player instead
+            setFile(null);
+            setFileName(null);
+            
             onUploadSuccess(response.preview_url, response.task_id);
           } else {
             throw new Error('No task ID returned from server');
@@ -193,39 +203,70 @@ const FileUpload: React.FC<FileUploadProps> = ({
         Upload your audio or video file for transcription. WAV and MP3 formats are recommended for best results.
       </p>
       
-      <div 
-        className={`w-full border-2 border-dashed rounded-lg p-6 mb-4 cursor-pointer text-center transition-colors
-          ${dragActive ? 'border-blue-500 bg-gray-700' : 'border-gray-600 hover:border-blue-400'}`}
-        onDragEnter={handleDrag}
-        onDragLeave={handleDrag}
-        onDragOver={handleDrag}
-        onDrop={handleDrop}
-        onClick={() => document.getElementById('fileInput')?.click()}
-      >
-        <input
-          id="fileInput"
-          type="file"
-          accept=".wav,.mp4,.mp3,.webm,.ogg,.flac,.m4a,.aac"
-          onChange={handleFileChange}
-          className="hidden"
-        />
-        
-        <div className="flex flex-col items-center justify-center py-5">
-          <svg className="w-10 h-10 mb-3 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
-          </svg>
-          <p className="mb-2 text-sm text-gray-400">
-            <span className="font-semibold">Click to upload</span> or drag and drop
-          </p>
-          <p className="text-xs text-gray-500">Audio/video files only (MAX. {config.upload.maxFileSizeMB}MB)</p>
-          <div className="mt-3 flex items-center text-xs text-blue-400">
-            <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-            </svg>
-            Recommended formats: .wav, .mp3 (best compatibility)
+      {/* Conditional rendering: File selection area or file name display */}
+      {fileName ? (
+        <div className="w-full border-2 border-gray-600 rounded-lg p-6 mb-4 bg-gray-700 transition-colors">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <svg className="h-10 w-10 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path>
+              </svg>
+              <div>
+                <p className="text-lg font-medium text-gray-200 truncate max-w-xs">{fileName}</p>
+                <p className="text-sm text-gray-400">
+                  {file?.size ? `${(file.size / (1024 * 1024)).toFixed(2)} MB` : ''}
+                </p>
+              </div>
+            </div>
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                setFile(null);
+                setFileName(null);
+              }}
+              className="text-gray-400 hover:text-gray-300 bg-gray-800 rounded-full p-2"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+              </svg>
+            </button>
           </div>
         </div>
-      </div>
+      ) : (
+        <div 
+          className={`w-full border-2 border-dashed rounded-lg p-6 mb-4 cursor-pointer text-center transition-colors
+            ${dragActive ? 'border-blue-500 bg-gray-700' : 'border-gray-600 hover:border-blue-400'}`}
+          onDragEnter={handleDrag}
+          onDragLeave={handleDrag}
+          onDragOver={handleDrag}
+          onDrop={handleDrop}
+          onClick={() => document.getElementById('fileInput')?.click()}
+        >
+          <input
+            id="fileInput"
+            type="file"
+            accept=".wav,.mp4,.mp3,.webm,.ogg,.flac,.m4a,.aac"
+            onChange={handleFileChange}
+            className="hidden"
+          />
+          
+          <div className="flex flex-col items-center justify-center py-5">
+            <svg className="w-10 h-10 mb-3 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+            </svg>
+            <p className="mb-2 text-sm text-gray-400">
+              <span className="font-semibold">Click to upload</span> or drag and drop
+            </p>
+            <p className="text-xs text-gray-500">Audio/video files only (MAX. {config.upload.maxFileSizeMB}MB)</p>
+            <div className="mt-3 flex items-center text-xs text-blue-400">
+              <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+              Recommended formats: .wav, .mp3 (best compatibility)
+            </div>
+          </div>
+        </div>
+      )}
       
       {fileError && (
         <div className="w-full bg-red-900/50 border border-red-700 rounded-lg p-3 mb-4 text-red-200 text-sm">
