@@ -98,16 +98,16 @@ class AudioSegment:
 class Config:
     auth_token: str
     target_sample_rate: int = 16000
-    min_segment_duration: float = 0.75  
-    overlap_threshold: float = 0.65  
+    min_segment_duration: float = 0.50  
+    overlap_threshold: float = 0.50  
     condition_on_previous_text: bool = True
     merge_gap_threshold: float = 0.5  
-    min_overlap_duration_for_separation: float = 0.6  
+    min_overlap_duration_for_separation: float = 0.5  
     max_embedding_segments: int = 100  
     enhance_separated_audio: bool = True
     use_vad_refinement: bool = True
     speaker_embedding_threshold: float = 0.40  
-    noise_reduction_amount: float = 0.65  
+    noise_reduction_amount: float = 0.50  
     transcription_batch_size: int = 8
     use_speaker_embeddings: bool = True
     temperature: float = 0.1
@@ -115,9 +115,32 @@ class Config:
     min_speakers: int = 1
     whisper_model_size: str = "small.en"
     transcribe_overlaps_individually: bool = True
-    sliding_window_size: float = 1.0  
-    sliding_window_step: float = 0.5  
+    sliding_window_size: float = 0.80  
+    sliding_window_step: float = 0.40  
     secondary_diarization_threshold: float = 0.30
+
+    # auth_token: str
+    # target_sample_rate: int = 16000
+    # min_segment_duration: float = 0.3  
+    # overlap_threshold: float = 0.65  
+    # condition_on_previous_text: bool = True
+    # merge_gap_threshold: float = 0.5  
+    # min_overlap_duration_for_separation: float = 0.6  
+    # max_embedding_segments: int = 100  
+    # enhance_separated_audio: bool = True
+    # use_vad_refinement: bool = True
+    # speaker_embedding_threshold: float = 0.40  
+    # noise_reduction_amount: float = 0.65  
+    # transcription_batch_size: int = 8
+    # use_speaker_embeddings: bool = True
+    # temperature: float = 0.1
+    # max_speakers: int = 2
+    # min_speakers: int = 1
+    # whisper_model_size: str = "small.en"
+    # transcribe_overlaps_individually: bool = True
+    # sliding_window_size: float = 0.5  
+    # sliding_window_step: float = 0.25  
+    # secondary_diarization_threshold: float = 0.30
 
 # =============================================================================
 # Utility Functions 
