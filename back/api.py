@@ -540,6 +540,26 @@ class EnhancedAudioProcessor:
 
     def load_audio(self, file_path: str) -> Tuple[torch.Tensor, int]:
         logging.info(f"Loading audio from {file_path}")
+        
+        # Check if file is MP3 and convert to WAV first if needed
+        if file_path.lower().endswith('.mp3'):
+            logging.info(f"Converting MP3 to WAV before processing: {file_path}")
+            temp_wav_path = file_path.replace('.mp3', '.wav')
+            if not os.path.exists(temp_wav_path):
+                try:
+                    # Convert to WAV using ffmpeg
+                    subprocess.check_call([
+                        'ffmpeg', '-y', '-i', file_path, 
+                        '-acodec', 'pcm_s16le', '-ar', str(self.config.target_sample_rate), 
+                        temp_wav_path
+                    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    logging.info(f"Successfully converted MP3 to WAV: {temp_wav_path}")
+                    file_path = temp_wav_path
+                except Exception as e:
+                    logging.error(f"Failed to convert MP3 to WAV: {str(e)}")
+                    # Continue with original file but log the warning
+        
+        # Continue with regular loading process
         signal, sample_rate = torchaudio.load(file_path)
         signal = signal.to(self.device)
         if signal.shape[0] > 1:
@@ -837,17 +857,36 @@ class EnhancedAudioProcessor:
 
     def process_file(self, file_path: str) -> Dict:
         try:
-            audio, sample_rate = self.load_audio(file_path)
+            # Convert MP3 to WAV if needed, for PyAnnote compatibility
+            original_file_path = file_path
+            if file_path.lower().endswith('.mp3'):
+                wav_path = file_path.replace('.mp3', '.wav')
+                if not os.path.exists(wav_path):
+                    logging.info(f"Converting MP3 to WAV for PyAnnote compatibility: {file_path}")
+                    try:
+                        subprocess.check_call([
+                            'ffmpeg', '-y', '-i', file_path, 
+                            '-acodec', 'pcm_s16le', '-ar', str(self.config.target_sample_rate), 
+                            wav_path
+                        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        logging.info(f"Successfully converted MP3 to WAV: {wav_path}")
+                        file_path = wav_path
+                    except Exception as e:
+                        logging.error(f"Failed to convert MP3 to WAV: {str(e)}")
+                        # Continue with original file but log the warning
+            
+            # Load the audio (this will use converted WAV if available)
+            audio, sample_rate = self.load_audio(original_file_path)
             audio_duration = audio.shape[-1] / sample_rate
             logging.info(f"Processing audio file: {audio_duration:.2f} seconds")
             
-            # Run Voice Activity Detection
+            # Run Voice Activity Detection on the WAV file
             logging.info("Running Voice Activity Detection...")
             vad_result = self.vad_pipeline(file_path)
             vad_intervals = get_pyannote_vad_intervals(vad_result)
             logging.info(f"VAD detected {len(vad_intervals)} speech intervals")
             
-            # Run Speaker Diarization
+            # Run Speaker Diarization on the WAV file
             logging.info("Running Speaker Diarization...")
             diarization_result = self.diarization(
                 file_path,
@@ -1165,10 +1204,32 @@ async def upload_file(file: UploadFile = File(...)):
     with open(file_path, "wb") as f:
         content = await file.read()
         f.write(content)
-        
-    # Store the file path for later processing
-    uploaded_files[task_id] = str(file_path)
-    update_progress(task_id, 0, "File uploaded and saved")
+    
+    update_progress(task_id, 0, "File uploaded")
+    
+    # Convert MP3 to WAV if needed
+    if str(file_path).lower().endswith('.mp3'):
+        update_progress(task_id, 5, "Converting MP3 to WAV")
+        wav_path = str(file_path).replace('.mp3', '.wav')
+        try:
+            subprocess.check_call([
+                'ffmpeg', '-y', '-i', str(file_path), 
+                '-acodec', 'pcm_s16le', '-ar', '16000', 
+                wav_path
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            logging.info(f"Converted MP3 to WAV: {wav_path}")
+            # Store the WAV path for processing
+            uploaded_files[task_id] = wav_path
+            update_progress(task_id, 10, "Conversion complete")
+        except Exception as e:
+            logging.error(f"Failed to convert MP3 to WAV: {str(e)}")
+            # Fall back to the original MP3 file
+            uploaded_files[task_id] = str(file_path)
+            update_progress(task_id, 10, "Using original MP3 file")
+    else:
+        # Non-MP3 file, use as is
+        uploaded_files[task_id] = str(file_path)
+        update_progress(task_id, 10, "File ready for processing")
     
     return JSONResponse(content={"task_id": task_id, "preview_url": f"/preview/{filename}"})
 
@@ -1180,7 +1241,7 @@ async def upload_url(url: str = Form(...)):
     # Generate task ID and prepare for download
     task_id = str(uuid.uuid4())
     parsed_url = urlparse(url)
-    extension = os.path.splitext(parsed_url.path)[1]
+    extension = os.path.splitext(parsed_url.path)[1].lower()
     
     if extension.lower() not in ['.mp3', '.wav', '.ogg', '.mp4', '.flac', '.m4a', '.aac']:
         extension = ".mp3"  # Default to mp3 if extension is unknown
@@ -1207,7 +1268,7 @@ async def upload_url(url: str = Form(...)):
                     file_id = open_match.group(1)
             
             if not file_id:
-                raise HTTPException(status_code=400, detail="Could not extract file ID from Google Drive URL")
+                raise HTTPException(status_code=400, detail="Invalid Google Drive URL format. Could not extract file ID.")
             
             logging.info(f"Extracted Google Drive file ID: {file_id}")
             update_progress(task_id, 10, "Downloading from Google Drive")
@@ -1225,12 +1286,32 @@ async def upload_url(url: str = Form(...)):
                         if chunk:
                             f.write(chunk)
             update_progress(task_id, 25, "Download complete")
+    
+        # Convert MP3 to WAV if needed
+        if str(file_path).lower().endswith('.mp3'):
+            update_progress(task_id, 26, "Converting MP3 to WAV")
+            wav_path = str(file_path).replace('.mp3', '.wav')
+            try:
+                subprocess.check_call([
+                    'ffmpeg', '-y', '-i', str(file_path), 
+                    '-acodec', 'pcm_s16le', '-ar', '16000', 
+                    wav_path
+                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                logging.info(f"Converted MP3 to WAV: {wav_path}")
+                # Store the WAV path for processing
+                uploaded_files[task_id] = wav_path
+                update_progress(task_id, 28, "Conversion complete")
+            except Exception as e:
+                logging.error(f"Failed to convert MP3 to WAV: {str(e)}")
+                # Fall back to the original MP3 file
+                uploaded_files[task_id] = str(file_path)
+        else:
+            # Non-MP3 file, use as is
+            uploaded_files[task_id] = str(file_path)
+            
     except Exception as e:
         logging.error(f"Error downloading file from URL {url}: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Failed to download file: {str(e)}")
-        
-    # Store the file path for later processing
-    uploaded_files[task_id] = str(file_path)
     
     return JSONResponse(content={
         "task_id": task_id,
