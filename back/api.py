@@ -106,7 +106,7 @@ class Config:
     max_embedding_segments: int = 100  
     enhance_separated_audio: bool = True
     use_vad_refinement: bool = True
-    speaker_embedding_threshold: float = 0.40  
+    speaker_embedding_threshold: float = 0.50  
     noise_reduction_amount: float = 0.50  
     transcription_batch_size: int = 8
     use_speaker_embeddings: bool = True
@@ -117,7 +117,7 @@ class Config:
     transcribe_overlaps_individually: bool = True
     sliding_window_size: float = 0.80  
     sliding_window_step: float = 0.40  
-    secondary_diarization_threshold: float = 0.30
+    secondary_diarization_threshold: float = 0.40
 
 # =============================================================================
 # Utility Functions 
