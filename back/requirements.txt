@@ -16,7 +16,7 @@ pyannote.audio
 speechbrain
 noisereduce
 numpy
-ffmpeg
+ffmpeg-python
 
 # Utilities
 requests
