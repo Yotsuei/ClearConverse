@@ -370,6 +370,46 @@ def validate_url(url):
     
     return True
 
+def ensure_wav_format(file_path: str) -> str:
+    """
+    Ensures the audio file is in WAV format.
+    If it's an MP3, converts it to WAV and returns the new path.
+    Otherwise, returns the original path.
+    """
+    if not file_path.lower().endswith('.mp3'):
+        return file_path
+        
+    wav_path = file_path.replace('.mp3', '.wav')
+    logging.info(f"Converting MP3 to WAV: {file_path} -> {wav_path}")
+    
+    try:
+        # Use FFmpeg directly with subprocess
+        cmd = ['ffmpeg', '-y', '-i', file_path, '-acodec', 'pcm_s16le', '-ar', '16000', wav_path]
+        
+        # Run the command and capture output
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        stdout, stderr = process.communicate()
+        
+        if process.returncode != 0:
+            logging.error(f"FFmpeg conversion failed: {stderr.decode()}")
+            return file_path  # Return original file path if conversion fails
+        
+        # Verify the WAV file exists and has content
+        if os.path.exists(wav_path) and os.path.getsize(wav_path) > 0:
+            logging.info(f"Successfully converted MP3 to WAV: {wav_path}")
+            return wav_path
+        else:
+            logging.error(f"Conversion produced empty or missing file: {wav_path}")
+            return file_path
+    
+    except Exception as e:
+        logging.error(f"Error during MP3 conversion: {str(e)}")
+        return file_path  # Return original file path if exception occurs
+
 # =============================================================================
 # Enhanced Audio Processor Class
 # =============================================================================
@@ -859,21 +899,9 @@ class EnhancedAudioProcessor:
         try:
             # Convert MP3 to WAV if needed, for PyAnnote compatibility
             original_file_path = file_path
-            if file_path.lower().endswith('.mp3'):
-                wav_path = file_path.replace('.mp3', '.wav')
-                if not os.path.exists(wav_path):
-                    logging.info(f"Converting MP3 to WAV for PyAnnote compatibility: {file_path}")
-                    try:
-                        subprocess.check_call([
-                            'ffmpeg', '-y', '-i', file_path, 
-                            '-acodec', 'pcm_s16le', '-ar', str(self.config.target_sample_rate), 
-                            wav_path
-                        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        logging.info(f"Successfully converted MP3 to WAV: {wav_path}")
-                        file_path = wav_path
-                    except Exception as e:
-                        logging.error(f"Failed to convert MP3 to WAV: {str(e)}")
-                        # Continue with original file but log the warning
+
+            # Convert MP3 to WAV if needed
+            file_path = ensure_wav_format(file_path)
             
             # Load the audio (this will use converted WAV if available)
             audio, sample_rate = self.load_audio(original_file_path)
@@ -1192,7 +1220,7 @@ async def process_audio_with_progress(task_id: str, file_path: str):
 @app.post("/upload-file")
 async def upload_file(file: UploadFile = File(...)):
     """Endpoint to upload an audio file for processing"""
-    if not file.filename.endswith((".mp3", ".wav", ".ogg", ".mp4", ".flac", ".m4a", ".aac")):
+    if not file.filename.endswith((".mp3", ".wav",)):
         raise HTTPException(status_code=400, detail="Invalid file type provided.")
         
     # Generate a task ID and save the file
@@ -1207,27 +1235,13 @@ async def upload_file(file: UploadFile = File(...)):
     
     update_progress(task_id, 0, "File uploaded")
     
-    # Convert MP3 to WAV if needed
+    # Convert to WAV if it's an MP3
     if str(file_path).lower().endswith('.mp3'):
         update_progress(task_id, 5, "Converting MP3 to WAV")
-        wav_path = str(file_path).replace('.mp3', '.wav')
-        try:
-            subprocess.check_call([
-                'ffmpeg', '-y', '-i', str(file_path), 
-                '-acodec', 'pcm_s16le', '-ar', '16000', 
-                wav_path
-            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            logging.info(f"Converted MP3 to WAV: {wav_path}")
-            # Store the WAV path for processing
-            uploaded_files[task_id] = wav_path
-            update_progress(task_id, 10, "Conversion complete")
-        except Exception as e:
-            logging.error(f"Failed to convert MP3 to WAV: {str(e)}")
-            # Fall back to the original MP3 file
-            uploaded_files[task_id] = str(file_path)
-            update_progress(task_id, 10, "Using original MP3 file")
+        wav_path = ensure_wav_format(str(file_path))
+        uploaded_files[task_id] = wav_path
+        update_progress(task_id, 10, "Conversion complete")
     else:
-        # Non-MP3 file, use as is
         uploaded_files[task_id] = str(file_path)
         update_progress(task_id, 10, "File ready for processing")
     
@@ -1287,26 +1301,13 @@ async def upload_url(url: str = Form(...)):
                             f.write(chunk)
             update_progress(task_id, 25, "Download complete")
     
-        # Convert MP3 to WAV if needed
+        # Convert to WAV if it's an MP3
         if str(file_path).lower().endswith('.mp3'):
-            update_progress(task_id, 26, "Converting MP3 to WAV")
-            wav_path = str(file_path).replace('.mp3', '.wav')
-            try:
-                subprocess.check_call([
-                    'ffmpeg', '-y', '-i', str(file_path), 
-                    '-acodec', 'pcm_s16le', '-ar', '16000', 
-                    wav_path
-                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                logging.info(f"Converted MP3 to WAV: {wav_path}")
-                # Store the WAV path for processing
-                uploaded_files[task_id] = wav_path
-                update_progress(task_id, 28, "Conversion complete")
-            except Exception as e:
-                logging.error(f"Failed to convert MP3 to WAV: {str(e)}")
-                # Fall back to the original MP3 file
-                uploaded_files[task_id] = str(file_path)
+            update_progress(task_id, 5, "Converting MP3 to WAV")
+            wav_path = ensure_wav_format(str(file_path))
+            uploaded_files[task_id] = wav_path
+            update_progress(task_id, 10, "Conversion complete")
         else:
-            # Non-MP3 file, use as is
             uploaded_files[task_id] = str(file_path)
             
     except Exception as e:
