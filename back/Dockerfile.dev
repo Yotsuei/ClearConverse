@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
     wget \
     libsndfile1 \
     curl \
-    apt-get install -y ffmpeg && \
+    ffmpeg && \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
