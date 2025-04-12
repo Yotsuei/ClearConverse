@@ -9,8 +9,8 @@ python-dotenv
 
 # Audio and ML libraries (with CUDA support)
 --find-links https://download.pytorch.org/whl/cu121
-torch==2.5.1
-torchaudio==2.5.1
+torch>=2.5.1
+torchaudio>=2.5.1
 openai-whisper
 pyannote.audio
 speechbrain
