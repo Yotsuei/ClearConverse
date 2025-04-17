@@ -1,5 +1,6 @@
 # back/api.py
 
+# System
 import os
 import json
 import shutil
@@ -80,7 +81,7 @@ def load_environment():
 env_config = load_environment()
 
 # =============================================================================
-# Data Classes and Utility Functions (Same as your pipeline)
+# Data Classes
 # =============================================================================
 
 @dataclass
@@ -275,7 +276,7 @@ def download_file_from_google_drive(file_id, output_path=None):
             token = value
             break
     
-    # If we found a token, we need a second request with the token
+    # If a token is found, a second request with the token is needed
     if token:
         logging.info(f"Obtained confirmation token for Google Drive file {file_id}")
         params = {'id': file_id, 'confirm': token}
@@ -293,11 +294,10 @@ def download_file_from_google_drive(file_id, output_path=None):
         logging.error(error_msg)
         raise HTTPException(status_code=400, detail=error_msg)
     
-    # Check content type to ensure we're getting a file, not an HTML page
+    # Check content type to ensure it's getting a file, not an HTML page
     content_type = response.headers.get('Content-Type', '')
     if 'text/html' in content_type:
         logging.warning(f"Received HTML content instead of file. This might indicate access restrictions.")
-        # We could parse the HTML to extract a download link, but that's more complex
     
     # Write the file to disk
     with open(output_path, 'wb') as f:
@@ -318,7 +318,7 @@ def validate_url(url):
     
     # Special handling for Google Drive URLs
     if 'drive.google.com' in url:
-        # Just do a basic validation for Google Drive URLs
+        # Basic validation for Google Drive URLs
         file_id = None
         file_match = re.search(r'/file/d/([^/]+)', url)
         if file_match:
@@ -333,7 +333,7 @@ def validate_url(url):
         
         return True
     
-    # For non-Google Drive URLs, do the normal validation
+    # Normal validation for non-Google Drive URLs
     try:
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
@@ -351,7 +351,7 @@ def validate_url(url):
         
         is_valid_content = any(t in content_type for t in valid_types)
         
-        # If we can't determine from content-type, check URL extension
+        # Check URL extension content-type can't be determined
         if not is_valid_content:
             parsed_url = urlparse(url)
             path = parsed_url.path.lower()
@@ -491,7 +491,7 @@ class EnhancedAudioProcessor:
         ft_model_path = os.path.join(cache_dir, "resepformer-ft")
         
         try:
-            # First, load the base model to ensure we have a fallback
+            # First, load the base model to ensure a fallback is possible
             self.separator = SepformerSeparation.from_hparams(
                 source="speechbrain/resepformer-wsj02mix",
                 savedir=resepformer_path,
@@ -502,7 +502,7 @@ class EnhancedAudioProcessor:
             if os.path.exists(ft_model_path):
                 logging.info("Found fine-tuned RESepFormer model. Attempting to load...")
                 
-                # Similar to the Google Colab approach, create a temporary working directory
+                # Create a temporary working directory
                 import tempfile
                 import shutil
                 
@@ -523,7 +523,7 @@ class EnhancedAudioProcessor:
                             'decoder': torch.load(os.path.join(ft_model_path, 'decoder.ckpt'), map_location=self.device)
                         }
                         
-                        # Apply the component weights to our model
+                        # Apply the component weights to the model
                         self.separator.load_state_dict(state_dict, strict=False)
                         logging.info("Fine-tuned RESepFormer model loaded successfully!")
                     else:
@@ -533,7 +533,7 @@ class EnhancedAudioProcessor:
         
         except Exception as e:
             logging.error(f"Failed to load RESepFormer model: {str(e)}")
-            # Attempt fallback to base model if we haven't loaded it yet
+            # Attempt fallback to base model if fine-tuned model hasn't loaded it yet
             try:
                 logging.warning(f"Falling back to base RESepFormer model")
                 self.separator = SepformerSeparation.from_hparams(
@@ -597,7 +597,6 @@ class EnhancedAudioProcessor:
                     file_path = temp_wav_path
                 except Exception as e:
                     logging.error(f"Failed to convert MP3 to WAV: {str(e)}")
-                    # Continue with original file but log the warning
         
         # Continue with regular loading process
         signal, sample_rate = torchaudio.load(file_path)
