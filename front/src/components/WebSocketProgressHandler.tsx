@@ -154,7 +154,7 @@ const WebSocketProgressHandler: React.FC<WebSocketProgressHandlerProps> = ({
       console.error('Error checking task result:', err);
       onProgressUpdate(100, `Failed to get task result: ${(err as Error).message}`);
     }
-  };  
+  };
 
   // This component doesn't render anything
   return null;

@@ -111,6 +111,24 @@ const App: React.FC = () => {
       setIsWsConnected(true);
     }
     
+    // Special handling for cancellation messages
+    if (message.toLowerCase().includes('cancel')) {
+      setProcessingProgress(progress);
+      setProcessingMessage(message);
+      
+      // If progress is 100%, this is a completed cancellation
+      if (progress >= 100) {
+        setIsProcessing(false);
+        
+        // Reset the app after a short delay
+        setTimeout(() => {
+          resetState();
+        }, 2000);
+      }
+      return;
+    }
+    
+    // Normal progress handling
     // Ensure we never go backwards in progress
     if (progress >= processingProgress || progress === 0) {
       setProcessingProgress(progress);
@@ -121,7 +139,7 @@ const App: React.FC = () => {
     if (progress === 100) {
       setIsWsConnected(true);
     }
-  };
+  };  
 
   const handleProcessingComplete = (downloadUrl: string) => {
     if (downloadUrl) {
@@ -222,6 +240,7 @@ const App: React.FC = () => {
       
       // Immediately update UI state to show we're cancelling
       setProcessingMessage("Cancelling transcription...");
+      setProcessingProgress(99);  // Set to 99% to show the cancellation is in progress
       
       // First, attempt to cancel the backend processing
       fetch(`${API_BASE_URL}/cancel/${taskId}`, { method: 'POST' })
@@ -229,7 +248,6 @@ const App: React.FC = () => {
           if (!response.ok) {
             console.error('Failed to cancel task on server');
             // Even if the server call fails, keep showing cancelling
-            setProcessingMessage("Cancelling transcription...");
           }
           return response.json();
         })
@@ -242,7 +260,11 @@ const App: React.FC = () => {
           setIsProcessing(false);
           setProcessingProgress(100); // Set to 100 to indicate process is complete (cancelled)
           setProcessingMessage('Transcription cancelled');
-          // We keep isCancelling true to keep the button disabled
+          
+          // After a brief delay, reset the app state for a fresh start
+          setTimeout(() => {
+            resetState();
+          }, 2000);
         })
         .catch(err => {
           console.error('Error cancelling task:', err);
@@ -253,7 +275,11 @@ const App: React.FC = () => {
           setIsProcessing(false);
           setProcessingProgress(100);
           setProcessingMessage('Transcription cancelled');
-          // We keep isCancelling true to keep the button disabled
+          
+          // After a brief delay, reset the app state
+          setTimeout(() => {
+            resetState();
+          }, 2000);
         });
     } else {
       // Just reset frontend state if we don't have a task or aren't processing

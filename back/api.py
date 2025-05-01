@@ -437,21 +437,14 @@ class TaskInfo:
         self.has_transcript = False  # Flag to indicate if a transcript was created
         
     def cancel(self) -> bool:
-        """Signal cancellation for this task
-        
-        Returns:
-            bool: True if the task was active and is now being cancelled, False otherwise
-        """
-        # Only override task status if it's still active
-        if self.status in ["pending", "running"]:
-            self.priority_cancel = True
-            self.cancel_event.set()
-            self.status = "cancelling"
-            logging.info(f"Cancellation requested for task {self.task_id}")
-            return True
-        else:
-            logging.info(f"Cancellation requested for task {self.task_id} but task is in {self.status} state")
-            return False
+        """Signal cancellation for this task - simplified to always succeed"""
+        # Always mark as cancelled immediately
+        self.priority_cancel = True
+        self.cancel_event.set()
+        self.status = "cancelled"
+        self.end_time = datetime.now()
+        logging.info(f"Task {self.task_id} immediately marked as cancelled")
+        return True
 
     def mark_running(self):
         """Mark the task as running"""
@@ -2129,12 +2122,15 @@ async def preview_audio(filename: str):
     return FileResponse(str(file_path), media_type="audio/mpeg", filename=filename)
 
 @app.post("/cancel/{task_id}")
-async def cancel_task(task_id: str):
+async def cancel_task(task_id: str, background_tasks: BackgroundTasks):
     """
     Cancel an ongoing transcription task with immediate feedback
     """
     # Immediately update progress regardless of task state
     update_progress(task_id, 99, "Cancelling transcription...")
+    
+    # Add to background tasks to clean up files
+    background_tasks.add_task(clean_up_task_files, task_id)
     
     if task_id not in active_tasks:
         # Create a dummy task info for the case where the task exists but isn't in our tracking
@@ -2146,16 +2142,11 @@ async def cancel_task(task_id: str):
         # Final update to show cancelled
         update_progress(task_id, 100, "Transcription cancelled")
         
-        # Also remove any output files that might have been created
-        try:
-            task_output_dir = os.path.join(OUTPUT_DIR, task_id)
-            if os.path.exists(task_output_dir) and os.path.isdir(task_output_dir):
-                # Create a cancelled.txt file instead of deleting the directory
-                # This preserves any transcript that might have been created
-                with open(os.path.join(task_output_dir, "cancelled.txt"), "w") as f:
-                    f.write("Task was cancelled")
-        except Exception as e:
-            logging.error(f"Error creating cancellation marker: {e}")
+        # Add to result store to ensure proper status reporting
+        result_store[task_id] = {
+            "status": "cancelled", 
+            "message": "Transcription was cancelled"
+        }
         
         return JSONResponse(content={
             "status": "not_found", 
@@ -2165,35 +2156,16 @@ async def cancel_task(task_id: str):
     
     task_info = active_tasks[task_id]
     
-    # Force cancellation if task is still active, but don't override completed tasks
-    if task_info.status in ["pending", "running"]:
-        task_info.cancel()
-        task_info.priority_cancel = True
-        
-        # Mark as cancelling
-        task_info.status = "cancelling"
-        logging.info(f"Task {task_id} status set to cancelling")
-        
-        # Override the result store for active tasks
-        result_store[task_id] = {"status": "cancelled", "message": "Transcription was cancelled"}
-    elif task_info.status == "completed":
-        # For completed tasks, check if it has a transcript
-        transcript_file = Path(OUTPUT_DIR) / task_id / "transcript.txt"
-        
-        if not transcript_file.exists():
-            # No transcript file, so we can mark as cancelled
-            task_info.mark_cancelled()
-            logging.info(f"Completed task {task_id} has no transcript file, marking as cancelled")
-            result_store[task_id] = {"status": "cancelled", "message": "Transcription was cancelled"}
-        else:
-            # Transcript exists, don't override the completed status or delete the file
-            logging.info(f"Task {task_id} is completed with transcript file, not changing status")
-            # We'll still acknowledge the cancellation request
-            return JSONResponse(content={
-                "status": "already_completed",
-                "message": "Task already completed with transcript available",
-                "progress": 100
-            })
+    # Force cancellation and always mark as cancelled
+    task_info.cancel()
+    task_info.priority_cancel = True
+    task_info.status = "cancelled"
+    
+    # Override the result store
+    result_store[task_id] = {
+        "status": "cancelled", 
+        "message": "Transcription was cancelled"
+    }
     
     # Final update about cancellation
     update_progress(task_id, 100, "Transcription cancelled")
@@ -2203,6 +2175,25 @@ async def cancel_task(task_id: str):
         "message": "Cancellation request processed",
         "progress": 100
     })
+
+async def clean_up_task_files(task_id: str):
+    """Clean up files associated with a cancelled task"""
+    try:
+        await asyncio.sleep(0.5)  # Small delay to ensure cancellation response is sent
+        
+        # Don't actually delete output files immediately
+        # Instead, just create a cancelled.txt marker
+        task_dir = os.path.join(OUTPUT_DIR, task_id)
+        if not os.path.exists(task_dir):
+            os.makedirs(task_dir, exist_ok=True)
+            
+        # Mark as cancelled by creating a file
+        with open(os.path.join(task_dir, "cancelled.txt"), "w") as f:
+            f.write(f"Task cancelled at {datetime.now().isoformat()}")
+            
+        logging.info(f"Created cancellation marker for task {task_id}")
+    except Exception as e:
+        logging.error(f"Error in clean_up_task_files for {task_id}: {e}")
 
 @app.get("/transcription/{task_id}")
 async def get_transcription(task_id: str):
@@ -2267,7 +2258,22 @@ async def get_transcription(task_id: str):
 @app.get("/task/{task_id}/result")
 async def get_task_result(task_id: str):
     """Check the result status of a task and verify file existence"""
+    # Check if task is marked as cancelled
+    if task_id in result_store and result_store[task_id].get("status") == "cancelled":
+        return JSONResponse(content={
+            "status": "cancelled",
+            "message": "Transcription was cancelled"
+        })
+    
     if task_id not in result_store:
+        # Check if there's a cancellation marker
+        cancelled_file = Path(OUTPUT_DIR) / task_id / "cancelled.txt"
+        if cancelled_file.exists():
+            return JSONResponse(content={
+                "status": "cancelled",
+                "message": "Transcription was cancelled"
+            })
+        
         return JSONResponse(status_code=404, content={"error": f"Task {task_id} not found"})
     
     # Get the stored result
@@ -2299,6 +2305,15 @@ async def progress_ws(websocket: WebSocket, task_id: str):
     await websocket.accept()
     
     try:
+        # First check if task is already cancelled
+        if task_id in result_store and result_store[task_id].get("status") == "cancelled":
+            # Send the cancellation status immediately
+            await websocket.send_json({
+                "progress": 100,
+                "message": "Transcription cancelled"
+            })
+            return
+        
         # Get current progress data
         current_data = progress_store.get(task_id, {"progress": 0, "message": "Initializing..."})
         
@@ -2316,6 +2331,17 @@ async def progress_ws(websocket: WebSocket, task_id: str):
         while True:
             # Use shorter sleep time for more responsive updates
             await asyncio.sleep(0.2)  # Reduced from 0.5 to 0.2 seconds
+            
+            # Check if task has been cancelled in result_store
+            if task_id in result_store and result_store[task_id].get("status") == "cancelled":
+                # If cancelled, immediately send the cancellation update
+                cancel_data = {"progress": 100, "message": "Transcription cancelled"}
+                try:
+                    await websocket.send_json(cancel_data)
+                except RuntimeError:
+                    # Connection was closed while we were sending
+                    pass
+                break
             
             # Re-check task status
             task_info = active_tasks.get(task_id)
