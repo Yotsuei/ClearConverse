@@ -76,31 +76,6 @@ const App: React.FC = () => {
     }
   };
 
-  // Fetch the transcription text
-  const fetchTranscription = async (taskId: string) => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/transcription/${taskId}`);
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch transcription: ${response.status} ${response.statusText}`);
-      }
-      
-      const data = await response.json();
-      
-      if (data.transcription) {
-        setTranscript(data.transcription);
-        setDownloadUrl(`/download/${taskId}/transcript.txt`);
-      } else {
-        throw new Error('No transcription data returned');
-      }
-    } catch (error) {
-      console.error('Error fetching transcription:', error);
-      alert(`Failed to get transcription: ${(error as Error).message}`);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
   // WebSocket progress handling
   const handleProgressUpdate = (progress: number, message: string) => {
     if (progress > 0) {
@@ -232,6 +207,54 @@ const App: React.FC = () => {
     } catch (error) {
       console.error('Error starting transcription:', error);
       alert(`Failed to start transcription: ${(error as Error).message}`);
+      setIsProcessing(false);
+    }
+  };
+
+  const handleApiError = (error: any) => {
+    if (error.response) {
+      // The request was made and the server responded with a status code
+      // that falls out of the range of 2xx
+      if (error.response.status === 413) {
+        alert(`File size exceeds the ${config.upload.maxFileSizeMB}MB limit. Please upload a smaller file.`);
+      } else if (error.response.data && error.response.data.detail) {
+        alert(`Error: ${error.response.data.detail}`);
+      } else {
+        alert(`Server error: ${error.response.status}`);
+      }
+    } else if (error.request) {
+      // The request was made but no response was received
+      alert('No response received from server. Please check your connection and try again.');
+    } else {
+      // Something happened in setting up the request that triggered an Error
+      alert(`Error: ${error.message}`);
+    }
+  };
+  
+  // Update the fetchTranscription function in App.tsx to handle file size errors
+  const fetchTranscription = async (taskId: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/transcription/${taskId}`);
+      
+      if (!response.ok) {
+        if (response.status === 413) {
+          throw new Error(`File size exceeds the ${config.upload.maxFileSizeMB}MB limit. Please upload a smaller file.`);
+        }
+        throw new Error(`Failed to fetch transcription: ${response.status} ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.transcription) {
+        setTranscript(data.transcription);
+        setDownloadUrl(`/download/${taskId}/transcript.txt`);
+      } else {
+        throw new Error('No transcription data returned');
+      }
+    } catch (error) {
+      console.error('Error fetching transcription:', error);
+      alert(`Failed to get transcription: ${(error as Error).message}`);
+    } finally {
       setIsProcessing(false);
     }
   };

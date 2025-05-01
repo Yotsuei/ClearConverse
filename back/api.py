@@ -1216,12 +1216,27 @@ async def process_audio_with_progress(task_id: str, file_path: str):
 # API Endpoints
 # =============================================================================
 
+# Add this constant at the top of the file, after the imports
+MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10MB
+
+# Modify the upload-file endpoint to include file size validation
 @app.post("/upload-file")
 async def upload_file(file: UploadFile = File(...)):
     """Endpoint to upload an audio file for processing"""
     if not file.filename.endswith((".mp3", ".wav",)):
         raise HTTPException(status_code=400, detail="Invalid file type provided.")
-        
+    
+    # Check file size before processing
+    # Read the content into memory to check size
+    content = await file.read()
+    file_size = len(content)
+    
+    if file_size > MAX_FILE_SIZE_BYTES:
+        raise HTTPException(
+            status_code=413, 
+            detail=f"File size exceeds the maximum limit of 10MB. Your file is {file_size / (1024 * 1024):.2f}MB."
+        )
+    
     # Generate a task ID and save the file
     task_id = str(uuid.uuid4())
     extension = os.path.splitext(file.filename)[1]
@@ -1229,8 +1244,7 @@ async def upload_file(file: UploadFile = File(...)):
     file_path = temp_uploads / filename
     
     with open(file_path, "wb") as f:
-        content = await file.read()
-        f.write(content)
+        f.write(content)  # Use the content we already read
     
     update_progress(task_id, 0, "File uploaded")
     
@@ -1286,19 +1300,129 @@ async def upload_url(url: str = Form(...)):
             logging.info(f"Extracted Google Drive file ID: {file_id}")
             update_progress(task_id, 10, "Downloading from Google Drive")
             
-            # Use the special Google Drive download function
-            file_path = download_file_from_google_drive(file_id, str(file_path))
-            update_progress(task_id, 25, "Download complete")
-        else:
-            # For non-Google Drive URLs, use the regular download function
-            update_progress(task_id, 5, "Downloading audio from URL")
-            with requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, stream=True, timeout=60) as r:
-                r.raise_for_status()
-                with open(file_path, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=8192):
+            # For Google Drive, we'll check size during download
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=extension)
+            temp_file.close()
+            
+            # First, make a HEAD request to check content length if possible
+            session = requests.Session()
+            try:
+                head_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+                head_response = session.head(head_url, timeout=10)
+                content_length = head_response.headers.get('Content-Length')
+                
+                if content_length and int(content_length) > MAX_FILE_SIZE_BYTES:
+                    size_mb = int(content_length) / (1024 * 1024)
+                    raise HTTPException(
+                        status_code=413, 
+                        detail=f"File size exceeds the maximum limit of 10MB. File size: {size_mb:.2f}MB"
+                    )
+            except requests.exceptions.RequestException:
+                # If HEAD request fails, we'll check during download
+                pass
+            
+            # Use the special Google Drive download function with size checking
+            try:
+                download_size = 0
+                URL = "https://drive.google.com/uc?export=download"
+                
+                # Get token if needed
+                session = requests.Session()
+                response = session.get(URL, params={'id': file_id}, stream=True)
+                token = None
+                for key, value in response.cookies.items():
+                    if key.startswith('download_warning'):
+                        token = value
+                        break
+                
+                # Download with token if needed
+                params = {'id': file_id, 'confirm': token} if token else {'id': file_id}
+                response = session.get(URL, params=params, stream=True)
+                
+                with open(temp_file.name, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
                         if chunk:
+                            download_size += len(chunk)
+                            if download_size > MAX_FILE_SIZE_BYTES:
+                                # Close and delete the file
+                                f.close()
+                                os.unlink(temp_file.name)
+                                size_mb = download_size / (1024 * 1024)
+                                raise HTTPException(
+                                    status_code=413, 
+                                    detail=f"File size exceeds the maximum limit of 10MB. File size: {size_mb:.2f}MB"
+                                )
                             f.write(chunk)
-            update_progress(task_id, 25, "Download complete")
+                
+                # Move temp file to final location
+                shutil.move(temp_file.name, file_path)
+                logging.info(f"Successfully downloaded Google Drive file {file_id} to {file_path}")
+                update_progress(task_id, 25, "Download complete")
+            
+            except HTTPException:
+                # Re-raise HTTPExceptions
+                raise
+            except Exception as e:
+                if os.path.exists(temp_file.name):
+                    os.unlink(temp_file.name)
+                logging.error(f"Error downloading from Google Drive: {str(e)}")
+                raise HTTPException(status_code=400, detail=f"Failed to download file: {str(e)}")
+        else:
+            # For non-Google Drive URLs, use the regular download function with size checking
+            update_progress(task_id, 5, "Downloading audio from URL")
+            
+            # First, make a HEAD request to check content length if possible
+            try:
+                head_response = requests.head(url, timeout=10, 
+                                            headers={'User-Agent': 'Mozilla/5.0'})
+                content_length = head_response.headers.get('Content-Length')
+                
+                if content_length and int(content_length) > MAX_FILE_SIZE_BYTES:
+                    size_mb = int(content_length) / (1024 * 1024)
+                    raise HTTPException(
+                        status_code=413, 
+                        detail=f"File size exceeds the maximum limit of 10MB. File size: {size_mb:.2f}MB"
+                    )
+            except requests.exceptions.RequestException:
+                # If HEAD request fails, we'll check during download
+                pass
+            
+            # Download with size checking
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=extension)
+            temp_file.close()
+            
+            try:
+                download_size = 0
+                with requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, 
+                                stream=True, timeout=60) as r:
+                    r.raise_for_status()
+                    with open(temp_file.name, 'wb') as f:
+                        for chunk in r.iter_content(chunk_size=8192):
+                            if chunk:
+                                download_size += len(chunk)
+                                if download_size > MAX_FILE_SIZE_BYTES:
+                                    # Close and delete the file
+                                    f.close()
+                                    os.unlink(temp_file.name)
+                                    size_mb = download_size / (1024 * 1024)
+                                    raise HTTPException(
+                                        status_code=413, 
+                                        detail=f"File size exceeds the maximum limit of 10MB. File size: {size_mb:.2f}MB"
+                                    )
+                                f.write(chunk)
+                
+                # Move temp file to final location
+                shutil.move(temp_file.name, file_path)
+                update_progress(task_id, 25, "Download complete")
+            
+            except HTTPException:
+                # Re-raise HTTPExceptions
+                raise
+            except Exception as e:
+                if os.path.exists(temp_file.name):
+                    os.unlink(temp_file.name)
+                logging.error(f"Error downloading from URL: {str(e)}")
+                raise HTTPException(status_code=400, detail=f"Failed to download file: {str(e)}")
     
         # Convert to WAV if it's an MP3
         if str(file_path).lower().endswith('.mp3'):

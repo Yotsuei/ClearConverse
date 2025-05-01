@@ -63,6 +63,11 @@ const FileUpload: React.FC<FileUploadProps> = ({
     return hasValidExtension || hasValidMimeType;
   };
 
+  // Validate file size against the configured limit
+  const isValidFileSize = (file: File): boolean => {
+    return file.size <= config.upload.maxFileSizeBytes;
+  };
+
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files && event.target.files.length > 0) {
       // Clear any previous transcription when selecting a new file
@@ -70,8 +75,18 @@ const FileUpload: React.FC<FileUploadProps> = ({
       
       const selectedFile = event.target.files[0];
       
+      // First check file type
       if (!isValidFileType(selectedFile)) {
         setFileError('Invalid file type. Please use .wav or .mp3 files for best results.');
+        setFile(null);
+        setFileName(null);
+        return;
+      }
+      
+      // Then check file size
+      if (!isValidFileSize(selectedFile)) {
+        const fileSizeMB = (selectedFile.size / (1024 * 1024)).toFixed(2);
+        setFileError(`File size exceeds the ${config.upload.maxFileSizeMB}MB limit. Your file is ${fileSizeMB}MB.`);
         setFile(null);
         setFileName(null);
         return;
@@ -104,8 +119,18 @@ const FileUpload: React.FC<FileUploadProps> = ({
       
       const droppedFile = e.dataTransfer.files[0];
       
+      // First check file type
       if (!isValidFileType(droppedFile)) {
         setFileError('Invalid file type. Please use .wav or .mp3 files for best results.');
+        setFile(null);
+        setFileName(null);
+        return;
+      }
+      
+      // Then check file size
+      if (!isValidFileSize(droppedFile)) {
+        const fileSizeMB = (droppedFile.size / (1024 * 1024)).toFixed(2);
+        setFileError(`File size exceeds the ${config.upload.maxFileSizeMB}MB limit. Your file is ${fileSizeMB}MB.`);
         setFile(null);
         setFileName(null);
         return;
@@ -131,6 +156,13 @@ const FileUpload: React.FC<FileUploadProps> = ({
   const handleUpload = async () => {
     if (!file) {
       alert('Please select a file first.');
+      return;
+    }
+    
+    // Final size check before upload
+    if (!isValidFileSize(file)) {
+      const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2);
+      setFileError(`File size exceeds the ${config.upload.maxFileSizeMB}MB limit. Your file is ${fileSizeMB}MB.`);
       return;
     }
     
@@ -173,6 +205,9 @@ const FileUpload: React.FC<FileUploadProps> = ({
           } else {
             throw new Error('No task ID returned from server');
           }
+        } else if (xhr.status === 413) {
+          // Handle "Payload Too Large" error specifically
+          throw new Error(`File size exceeds the ${config.upload.maxFileSizeMB}MB limit.`);
         } else {
           throw new Error(`Error: ${xhr.statusText || 'Server returned an error'}`);
         }
@@ -190,7 +225,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
       xhr.send(formData);
     } catch (error) {
       console.error('Upload failed:', error);
-      alert(`There was an error uploading your file: ${(error as Error).message}`);
+      setFileError(`There was an error uploading your file: ${(error as Error).message}`);
       setIsUploading(false);
       setUploadXhr(null);
     }
@@ -305,6 +340,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
           Supported File Formats
         </h3>
         <p className="mt-2 text-gray-400">For best results, use WAV or MP3 files with clear audio and minimal background noise.</p>
+        <p className="mt-2 text-gray-400">Maximum file size: <span className="font-semibold text-blue-400">{config.upload.maxFileSizeMB}MB</span></p>
       </div>
     </div>
   );

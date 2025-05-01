@@ -129,8 +129,17 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
           } else {
             throw new Error('No task ID returned from server');
           }
+        } else if (xhr.status === 413) {
+          // Handle "Payload Too Large" error specifically
+          throw new Error(`File size exceeds the ${config.upload.maxFileSizeMB}MB limit.`);
         } else {
-          throw new Error(`Error: ${xhr.statusText || 'Server returned an error'}`);
+          try {
+            // Try to parse error response for more details
+            const errorResponse = JSON.parse(xhr.responseText);
+            throw new Error(errorResponse.detail || `Error: ${xhr.statusText || 'Server returned an error'}`);
+          } catch (parseError) {
+            throw new Error(`Error: ${xhr.statusText || 'Server returned an error'}`);
+          }
         }
       };
 
@@ -245,6 +254,9 @@ const UrlUpload: React.FC<UrlUploadProps> = ({
             <p className="mt-2 text-xs text-gray-400">
               For Google Drive: Open your file, click "Share", then "Change to anyone with the link",
               and finally "Copy link".
+            </p>
+            <p className="mt-2 text-xs text-gray-400">
+              <strong>Note:</strong> File size must be under {config.upload.maxFileSizeMB}MB.
             </p>
           </div>
         </div>
