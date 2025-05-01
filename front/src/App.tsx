@@ -36,13 +36,42 @@ const App: React.FC = () => {
   const [processingMessage, setProcessingMessage] = useState<string>('Preparing to process...');
   const [isWsConnected, setIsWsConnected] = useState(false);
   const [connectionAttempts, setConnectionAttempts] = useState(0);
+  const [isCancelling, setIsCancelling] = useState(false);
+
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      // Clean up files when the page is refreshed or closed
+      if (taskId) {
+        // Use the sync version of fetch for beforeunload
+        // Note: This may not complete in all browsers, but it's a best effort
+        navigator.sendBeacon(`${API_BASE_URL}/cleanup/${taskId}`);
+      }
+    };
+  
+    // Add event listener for page unload
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    
+    // Clean up the event listener when component unmounts
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [taskId, API_BASE_URL]);  
 
   // Fetch transcription when processing is complete
   useEffect(() => {
     if (processingProgress === 100 && taskId) {
-      fetchTranscription(taskId);
+      // Only fetch transcription if the message doesn't indicate cancellation
+      const isCancelled = processingMessage.toLowerCase().includes('cancel');
+      
+      if (!isCancelled) {
+        fetchTranscription(taskId);
+      } else {
+        // If cancelled, just update UI state
+        setIsProcessing(false);
+        // Don't clear the message, keep showing "Cancelled"
+      }
     }
-  }, [processingProgress, taskId]);
+  }, [processingProgress, taskId, processingMessage]);  
 
   // Fallback to polling if WebSocket fails
   useEffect(() => {
@@ -117,8 +146,23 @@ const App: React.FC = () => {
 
   // Reset all state
   const resetState = () => {
-    cancelTranscription();
+    // Only attempt to clean up if we have a task ID
+    if (taskId) {
+      // Make a delete request to clean up files on the server
+      fetch(`${API_BASE_URL}/cleanup/${taskId}`, { method: 'DELETE' })
+        .then(response => {
+          if (!response.ok) {
+            console.error('Failed to cleanup task on server');
+          } else {
+            console.log(`Successfully cleaned up task ${taskId} on server`);
+          }
+        })
+        .catch(err => {
+          console.error('Error cleaning up task:', err);
+        });
+    }
     
+    // Reset all client-side state
     setAudioSource({ previewUrl: null });
     setTranscript(null);
     setDownloadUrl(null);
@@ -130,19 +174,29 @@ const App: React.FC = () => {
     setProcessingMessage('Preparing to process...');
     setIsWsConnected(false);
     setConnectionAttempts(0);
-  };
+    setIsCancelling(false);
+  };  
   
   // Clear just the transcription
   const clearTranscription = () => {
+    if (taskId) {
+      // Use the same full cleanup endpoint
+      fetch(`${API_BASE_URL}/cleanup/${taskId}`, { method: 'DELETE' })
+        .catch(err => {
+          console.error('Error cleaning up task:', err);
+        });
+    }
+    
+    // Reset transcription-related state only (but keeps audio UI state)
     setTranscript(null);
     setDownloadUrl(null);
     setIsProcessing(false);
     setProcessingProgress(0);
-  };
+  };  
   
   // Reset everything
   const clearAll = () => {
-    resetState();
+    resetState(); // This now includes server cleanup
   };
   
   // Select a module from the main menu
@@ -160,23 +214,55 @@ const App: React.FC = () => {
 
   // Cancel ongoing transcription
   const cancelTranscription = () => {
-    setIsUploading(false);
-    setUploadProgress(0);
-    setIsProcessing(false);
-    setProcessingProgress(0);
-
-    if (taskId) {
-      fetch(`${API_BASE_URL}/cleanup/${taskId}`, { method: 'DELETE' })
+    // Only attempt to cancel if we have a task ID and we're in processing state
+    // and we're not already cancelling
+    if (taskId && (isUploading || isProcessing) && !isCancelling) {
+      // Set the cancelling state to disable the button
+      setIsCancelling(true);
+      
+      // Immediately update UI state to show we're cancelling
+      setProcessingMessage("Cancelling transcription...");
+      
+      // First, attempt to cancel the backend processing
+      fetch(`${API_BASE_URL}/cancel/${taskId}`, { method: 'POST' })
         .then(response => {
           if (!response.ok) {
-            console.error('Failed to cleanup task on server');
+            console.error('Failed to cancel task on server');
+            // Even if the server call fails, keep showing cancelling
+            setProcessingMessage("Cancelling transcription...");
           }
+          return response.json();
+        })
+        .then(data => {
+          console.log('Cancellation response:', data);
+          
+          // Update UI state to show cancellation
+          setIsUploading(false);
+          setUploadProgress(0);
+          setIsProcessing(false);
+          setProcessingProgress(100); // Set to 100 to indicate process is complete (cancelled)
+          setProcessingMessage('Transcription cancelled');
+          // We keep isCancelling true to keep the button disabled
         })
         .catch(err => {
-          console.error('Error cleaning up task:', err);
+          console.error('Error cancelling task:', err);
+          
+          // Still update UI state even if the cancellation API fails
+          setIsUploading(false);
+          setUploadProgress(0);
+          setIsProcessing(false);
+          setProcessingProgress(100);
+          setProcessingMessage('Transcription cancelled');
+          // We keep isCancelling true to keep the button disabled
         });
+    } else {
+      // Just reset frontend state if we don't have a task or aren't processing
+      setIsUploading(false);
+      setUploadProgress(0);
+      setIsProcessing(false);
+      setProcessingProgress(0);
     }
-  };
+  };  
 
   // Start the transcription process
   const startTranscription = async () => {
@@ -231,7 +317,6 @@ const App: React.FC = () => {
     }
   };
   
-  // Update the fetchTranscription function in App.tsx to handle file size errors
   const fetchTranscription = async (taskId: string) => {
     try {
       const response = await fetch(`${API_BASE_URL}/transcription/${taskId}`);
@@ -327,12 +412,25 @@ const App: React.FC = () => {
       <div className="space-y-4">
         <AudioPlayer audioUrl={audioSource.previewUrl!} />
         {taskId && !transcript && (
-          <button
-            onClick={handleTranscribe}
-            className="w-full py-3 px-5 text-white font-bold rounded-lg transition-all duration-300 bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg"
-          >
-            Start Transcription
-          </button>
+          isProcessing ? (
+            <button
+              onClick={cancelTranscription}
+              disabled={isCancelling}
+              className={`w-full py-3 px-5 text-white font-bold rounded-lg transition-all duration-300 
+                ${isCancelling 
+                  ? 'bg-gray-500 cursor-not-allowed' 
+                  : 'bg-red-600 hover:bg-red-700 active:scale-98 shadow-lg'}`}
+            >
+              {isCancelling ? 'Cancelling...' : 'Cancel Transcription'}
+            </button>
+          ) : (
+            <button
+              onClick={handleTranscribe}
+              className="w-full py-3 px-5 text-white font-bold rounded-lg transition-all duration-300 bg-blue-600 hover:bg-blue-700 active:scale-98 shadow-lg"
+            >
+              Start Transcription
+            </button>
+          )
         )}
       </div>
     );

@@ -61,7 +61,19 @@ const WebSocketProgressHandler: React.FC<WebSocketProgressHandlerProps> = ({
           return;
         }
         
-        // Update the progress with the exact message from backend
+        // Special handling for cancellation messages - always show these
+        if (data.message && data.message.toLowerCase().includes('cancel')) {
+          onProgressUpdate(data.progress || 99, data.message);
+          
+          // If progress is 100, this is a completed cancellation
+          if (data.progress >= 100) {
+            // Check if there's a download URL
+            checkTaskResult(taskId);
+          }
+          return;
+        }
+        
+        // Regular progress updates
         if (data.progress !== undefined && data.message !== undefined) {
           onProgressUpdate(data.progress, data.message);
         }
@@ -74,7 +86,7 @@ const WebSocketProgressHandler: React.FC<WebSocketProgressHandlerProps> = ({
         console.error('Error parsing WebSocket message:', err);
         onProgressUpdate(5, 'Processing in progress...');
       }
-    };
+    };    
 
     ws.onerror = () => {
       // Show generic processing message instead of connection error
@@ -131,6 +143,10 @@ const WebSocketProgressHandler: React.FC<WebSocketProgressHandlerProps> = ({
       
       if (result.download_url) {
         onComplete(result.download_url);
+      } else if (result.status === "cancelled") {
+        // Handle cancelled state properly
+        onProgressUpdate(100, result.message || "Transcription was cancelled");
+        // Don't try to fetch transcription for cancelled tasks
       } else if (result.error) {
         onProgressUpdate(100, `Error: ${result.error}`);
       }
@@ -138,7 +154,7 @@ const WebSocketProgressHandler: React.FC<WebSocketProgressHandlerProps> = ({
       console.error('Error checking task result:', err);
       onProgressUpdate(100, `Failed to get task result: ${(err as Error).message}`);
     }
-  };
+  };  
 
   // This component doesn't render anything
   return null;

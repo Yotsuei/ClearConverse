@@ -10,7 +10,7 @@ interface ClearButtonProps {
 const ClearButton: React.FC<ClearButtonProps> = ({ 
   onClear, 
   isProcessing,
-  includeAudio = true // Default to true to clear everything
+  includeAudio = true
 }) => {
   const [showConfirm, setShowConfirm] = useState(false);
   
@@ -42,8 +42,8 @@ const ClearButton: React.FC<ClearButtonProps> = ({
             ? 'bg-red-600 hover:bg-red-700' 
             : 'bg-gray-700 hover:bg-gray-600'} 
           text-white transition-all hover:scale-105`}
-        aria-label={includeAudio ? "Clear everything" : "Clear transcription"}
-        title={includeAudio ? "Clear everything (audio and transcription)" : "Clear transcription only"}
+        aria-label="Reset everything"
+        title="Reset everything (cleans up files from server)"
       >
         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
@@ -55,14 +55,12 @@ const ClearButton: React.FC<ClearButtonProps> = ({
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 shadow-lg max-w-md mx-4">
             <h3 className="text-xl font-bold mb-4 text-gray-200">
-              {isProcessing ? "Interrupt Processing?" : (includeAudio ? "Clear Everything?" : "Clear Transcription?")}
+              {isProcessing ? "Interrupt Processing?" : "Reset Everything?"}
             </h3>
             <p className="text-gray-300 mb-6">
               {isProcessing 
-                ? "Are you sure you want to cancel the ongoing transcription process? All progress will be lost."
-                : (includeAudio 
-                  ? "Are you sure you want to clear both the audio and transcription data? This action cannot be undone."
-                  : "Are you sure you want to clear the transcription? The audio file will be kept.")}
+                ? "Are you sure you want to cancel the ongoing transcription process? All progress will be lost and files will be removed from the server."
+                : "Are you sure you want to reset? This will clear all current data including audio and transcription files from the server."}
             </p>
             <div className="flex justify-end gap-3">
               <button
@@ -75,7 +73,7 @@ const ClearButton: React.FC<ClearButtonProps> = ({
                 onClick={handleConfirmClear}
                 className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-colors"
               >
-                {isProcessing ? "Yes, Interrupt" : "Yes, Clear"}
+                {isProcessing ? "Yes, Interrupt & Reset" : "Yes, Reset"}
               </button>
             </div>
           </div>

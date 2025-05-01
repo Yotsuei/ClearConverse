@@ -11,8 +11,8 @@ const config = {
     
     // File upload limits
     upload: {
-      maxFileSizeMB: 10,  // Setting 10MB limit
-      maxFileSizeBytes: 10 * 1024 * 1024,  // 10MB in bytes
+      maxFileSizeMB: 25,  // Setting 10MB limit
+      maxFileSizeBytes: 25 * 1024 * 1024,  // 25 in bytes
       acceptedFileFormats: ['.wav', '.mp3', '.mp4', '.webm', '.ogg', '.flac', '.m4a', '.aac'],
       preferredFormats: ['.wav', '.mp3'],
     },

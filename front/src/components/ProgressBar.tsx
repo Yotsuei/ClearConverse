@@ -19,6 +19,11 @@ const ProgressBar: React.FC<ProgressBarProps> = ({
   
   // Generate default stage message if none provided
   const getDefaultStageMessage = () => {
+    // If we have an explicit message about cancellation, use it with priority
+    if (message && message.toLowerCase().includes('cancel')) {
+      return message;
+    }
+  
     if (type === 'upload') {
       if (progress < 25) return "Starting upload...";
       if (progress < 50) return "Uploading file...";
@@ -34,18 +39,34 @@ const ProgressBar: React.FC<ProgressBarProps> = ({
       if (progress < 95) return "Finalizing results...";
       return "Transcription complete!";
     }
-  };
+  };  
 
   // Get display message from prop or generate default
   const displayMessage = message || getDefaultStageMessage();
 
   // Style configuration based on type
   const styles = {
-    container: `w-full p-4 rounded-lg ${type === 'upload' ? 'bg-blue-900' : 'bg-blue-900'} border ${type === 'upload' ? 'border-blue-800' : 'border-blue-800'} mb-6`,
-    text: `text-sm font-medium ${type === 'upload' ? 'text-blue-300' : 'text-blue-300'}`,
-    progressBar: `absolute top-0 bottom-0 left-0 ${type === 'upload' ? 'bg-blue-600' : 'bg-blue-500'}`,
-    pulseBg: `absolute inset-0 ${type === 'upload' ? 'bg-blue-600' : 'bg-blue-500'} opacity-30`
-  };
+    container: `w-full p-4 rounded-lg ${
+      message && message.toLowerCase().includes('cancel') 
+        ? 'bg-red-900 border-red-800' 
+        : (type === 'upload' ? 'bg-blue-900 border-blue-800' : 'bg-blue-900 border-blue-800')
+    } border mb-6`,
+    text: `text-sm font-medium ${
+      message && message.toLowerCase().includes('cancel') 
+        ? 'text-red-300' 
+        : (type === 'upload' ? 'text-blue-300' : 'text-blue-300')
+    }`,
+    progressBar: `absolute top-0 bottom-0 left-0 ${
+      message && message.toLowerCase().includes('cancel')
+        ? 'bg-red-600'
+        : (type === 'upload' ? 'bg-blue-600' : 'bg-blue-500')
+    }`,
+    pulseBg: `absolute inset-0 ${
+      message && message.toLowerCase().includes('cancel')
+        ? 'bg-red-600'
+        : (type === 'upload' ? 'bg-blue-600' : 'bg-blue-500')
+    } opacity-30`
+  };  
 
   return (
     <div className={styles.container}>
@@ -55,20 +76,6 @@ const ProgressBar: React.FC<ProgressBarProps> = ({
           <div className={styles.text}>
             {isIndeterminate ? '' : `${Math.round(progress)}%`}
           </div>
-          
-          {/* Cancel button */}
-          {onCancel && progress < 100 && (
-            <button 
-              onClick={onCancel}
-              className="text-red-400 hover:text-red-300 text-sm font-medium flex items-center gap-1"
-              aria-label="Cancel transcription"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
-              </svg>
-              Cancel
-            </button>
-          )}
         </div>
       </div>
       

@@ -61,14 +61,14 @@ const ResetButton: React.FC<ResetButtonProps> = ({
   return (
     <>
       <div className="fixed bottom-6 right-6 z-10 flex flex-col gap-3">
-        {/* Clear button only appears when we have a transcription and clear function is provided */}
+        {/* Clear button only appears when we have a transcription */}
         {hasTranscription && onClear && (
           <FloatingActionButton
             onClick={handleClearClick}
             icon={clearIcon}
-            label="Clear transcription"
+            label="Reset"
             color="yellow"
-            tooltip="Clear transcription but keep audio"
+            tooltip="Reset everything"
           />
         )}
         
@@ -78,7 +78,7 @@ const ResetButton: React.FC<ResetButtonProps> = ({
           icon={resetIcon}
           label="Reset everything"
           color={isProcessing ? "red" : "gray"}
-          tooltip="Reset everything (audio and transcription)"
+          tooltip="Reset everything"
         />
       </div>
       
@@ -87,14 +87,12 @@ const ResetButton: React.FC<ResetButtonProps> = ({
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 shadow-lg max-w-md mx-4">
             <h3 className="text-xl font-bold mb-4 text-gray-200">
-              {showConfirm === 'clear' ? "Clear Transcription" : "Reset Everything"}
+              Reset Everything
             </h3>
             <p className="text-gray-300 mb-6">
-              {showConfirm === 'clear' 
-                ? "Are you sure you want to clear the transcription? The audio file will be kept."
-                : isProcessing 
-                  ? "Are you sure you want to cancel the ongoing transcription process? All progress will be lost."
-                  : "Are you sure you want to reset? This will clear all current data including audio and transcription."}
+              {isProcessing 
+                ? "Are you sure you want to cancel the ongoing transcription process? All progress will be lost and files will be cleaned up from the server."
+                : "Are you sure you want to reset? This will clear all current data including audio and transcription files from the server."}
             </p>
             <div className="flex justify-end gap-3">
               <button
@@ -105,13 +103,9 @@ const ResetButton: React.FC<ResetButtonProps> = ({
               </button>
               <button
                 onClick={handleConfirmAction}
-                className={`px-4 py-2 ${showConfirm === 'clear' ? 'bg-yellow-600 hover:bg-yellow-700' : 'bg-red-600 hover:bg-red-700'} text-white font-medium rounded-lg transition-colors`}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-colors"
               >
-                {showConfirm === 'clear' 
-                  ? "Yes, Clear" 
-                  : isProcessing 
-                    ? "Yes, Interrupt" 
-                    : "Yes, Reset"}
+                {isProcessing ? "Yes, Cancel & Reset" : "Yes, Reset"}
               </button>
             </div>
           </div>
