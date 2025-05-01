@@ -99,15 +99,15 @@ class AudioSegment:
 class Config:
     auth_token: str
     target_sample_rate: int = 16000
-    min_segment_duration: float = 0.50  
+    min_segment_duration: float = 0.45  
     overlap_threshold: float = 0.50  
     condition_on_previous_text: bool = True
-    merge_gap_threshold: float = 0.5  
-    min_overlap_duration_for_separation: float = 0.5  
+    merge_gap_threshold: float = 0.50
+    min_overlap_duration_for_separation: float = 0.60  
     max_embedding_segments: int = 100  
     enhance_separated_audio: bool = True
     use_vad_refinement: bool = True
-    speaker_embedding_threshold: float = 0.50  
+    speaker_embedding_threshold: float = 0.40  
     noise_reduction_amount: float = 0.50  
     transcription_batch_size: int = 8
     use_speaker_embeddings: bool = True
@@ -118,7 +118,7 @@ class Config:
     transcribe_overlaps_individually: bool = True
     sliding_window_size: float = 0.80  
     sliding_window_step: float = 0.40  
-    secondary_diarization_threshold: float = 0.40
+    secondary_diarization_threshold: float = 0.30
 
 # =============================================================================
 # Utility Functions 
@@ -678,55 +678,158 @@ class EnhancedAudioProcessor:
         all_segments = [(segment.start, segment.end, speaker)
                         for segment, _, speaker in diarization_result.itertracks(yield_label=True)]
         speaker_segments = defaultdict(list)
+        
+        # Group segments by speaker
         for start, end, speaker in all_segments:
-            if (end - start) >= 1.0:
-                speaker_segments[speaker].append((start, end))
+            if (end - start) >= 0.75:  # Lower minimum duration from 1.0 to 0.75
+                speaker_segments[speaker].append((start, end, end-start))
+        
         speaker_embeddings = {}
         for speaker, segments in speaker_segments.items():
             logging.info(f"Building profile for speaker {speaker} using {len(segments)} segments")
-            segments.sort(key=lambda x: x[1]-x[0], reverse=True)
-            selected_segments = segments[:self.config.max_embedding_segments]
+            
+            # Sort by duration
+            segments_by_duration = sorted(segments, key=lambda x: x[2], reverse=True)
+            
+            # Take top segments by duration (half of max_embedding_segments)
+            top_segments = segments_by_duration[:self.config.max_embedding_segments // 2]
+            
+            # Sort the remaining segments by start time
+            temporal_segments = sorted([s for s in segments if s not in top_segments], key=lambda x: x[0])
+            
+            # Take segments spaced throughout the recording (the other half)
+            step = max(1, len(temporal_segments) // (self.config.max_embedding_segments // 2))
+            diverse_segments = temporal_segments[::step][:self.config.max_embedding_segments // 2]
+            
+            # Combine the two sets of segments
+            selected_segments = top_segments + diverse_segments
+            
+            # Extract embeddings from these segments
             embeddings = []
-            for start, end in selected_segments:
+            embedding_quality = []
+            for start, end, _ in selected_segments:
                 segment_audio = self._extract_segment(audio, start, end)
-                embedding = self._extract_embedding(segment_audio)
-                if embedding is not None:
-                    embeddings.append(embedding)
+                
+                # Apply noise reduction for cleaner embedding
+                if segment_audio.shape[-1] > self.config.target_sample_rate * 0.5:  # At least 0.5s
+                    segment_audio_clean = enhance_audio(segment_audio, 
+                                                    self.config.target_sample_rate,
+                                                    prop_decrease=self.config.noise_reduction_amount)
+                    embedding = self._extract_embedding(segment_audio_clean)
+                    if embedding is not None:
+                        # Estimate quality based on audio characteristics (e.g., signal variance)
+                        signal_var = torch.var(segment_audio).item()
+                        embeddings.append(embedding)
+                        embedding_quality.append(signal_var)
+            
             if embeddings:
-                speaker_embeddings[speaker] = torch.stack(embeddings).mean(dim=0)
-                logging.info(f"Created embedding for speaker {speaker}")
+                # If we have quality metrics, use weighted average based on quality
+                if embedding_quality:
+                    # Normalize quality scores
+                    total_quality = sum(embedding_quality)
+                    if total_quality > 0:
+                        weights = [q / total_quality for q in embedding_quality]
+                        weighted_sum = sum(e * w for e, w in zip(embeddings, weights))
+                        speaker_embeddings[speaker] = weighted_sum
+                    else:
+                        speaker_embeddings[speaker] = torch.stack(embeddings).mean(dim=0)
+                else:
+                    speaker_embeddings[speaker] = torch.stack(embeddings).mean(dim=0)
+                
+                logging.info(f"Created embedding for speaker {speaker} from {len(embeddings)} segments")
+            
         return speaker_embeddings
 
     def _resegment_overlap(self, audio_segment: torch.Tensor, seg_start: float, seg_end: float, speaker_profiles: Dict[str, torch.Tensor]) -> List[Tuple[float, float, str]]:
         window_size = self.config.sliding_window_size
         step = self.config.sliding_window_step
-        refined_segments = []
-        curr = seg_start
+        
+        # Use smaller steps for rapid exchanges
+        segment_duration = seg_end - seg_start
+        if segment_duration < 2.0:  # For short segments, use smaller step
+            step = min(step, segment_duration / 4)
+        
         window_results = []
+        curr = seg_start
+        prev_speaker = None
+        
         while curr + window_size <= seg_end:
             segment = self._extract_segment(audio_segment, curr - seg_start, curr - seg_start + window_size)
             embedding = self._extract_embedding(segment)
+            
             if embedding is not None:
                 similarities = [(spk, self._calculate_embedding_similarity(embedding, profile))
                                 for spk, profile in speaker_profiles.items()]
                 similarities.sort(key=lambda x: x[1], reverse=True)
-                dominant_speaker, confidence = similarities[0]
+                
+                # Use more aggressive filtering for speaker changes
+                top_speaker, top_confidence = similarities[0]
+                
+                # If we have multiple possible speakers, check if there's a clear winner
+                if len(similarities) > 1:
+                    second_speaker, second_confidence = similarities[1]
+                    confidence_gap = top_confidence - second_confidence
+                    
+                    # If confidences are very close, this might be a transition point
+                    if confidence_gap < 0.15 and prev_speaker and prev_speaker != top_speaker:
+                        # Use previous speaker for continuity unless there's strong evidence
+                        if second_speaker == prev_speaker and second_confidence > 0.65 * top_confidence:
+                            top_speaker = prev_speaker
+                            top_confidence = second_confidence
+                
+                dominant_speaker, confidence = top_speaker, top_confidence
+                prev_speaker = dominant_speaker
             else:
-                dominant_speaker, confidence = "UNKNOWN", 0.0
+                # If no embedding could be extracted, try to maintain continuity
+                dominant_speaker = prev_speaker if prev_speaker else "UNKNOWN"
+                confidence = 0.0
+                
             window_results.append((curr, curr + window_size, dominant_speaker, confidence))
             curr += step
+        
         if not window_results:
             return [(seg_start, seg_end, "UNKNOWN")]
+        
+        # Enhanced merging logic that's more sensitive to rapid exchanges
         merged = []
-        cur_start, cur_end, cur_spk, _ = window_results[0]
+        cur_start, cur_end, cur_spk, cur_conf = window_results[0]
+        
         for start, end, spk, conf in window_results[1:]:
-            if spk == cur_spk and start - cur_end <= step:
+            if spk == cur_spk and start - cur_end <= max(step * 1.5, 0.2):  # More permissive on gaps
                 cur_end = end
+                # Update confidence to the average
+                cur_conf = (cur_conf + conf) / 2
             else:
-                merged.append((cur_start, cur_end, cur_spk))
-                cur_start, cur_end, cur_spk = start, end, spk
-        merged.append((cur_start, cur_end, cur_spk))
-        return [(max(seg_start, s), min(seg_end, e), spk) for s, e, spk in merged]
+                # Only include segment if it's long enough (avoid excessive fragmentation)
+                if (cur_end - cur_start) >= min(0.3, segment_duration / 10):
+                    merged.append((cur_start, cur_end, cur_spk))
+                cur_start, cur_end, cur_spk, cur_conf = start, end, spk, conf
+        
+        # Add the last segment
+        if (cur_end - cur_start) >= min(0.3, segment_duration / 10):
+            merged.append((cur_start, cur_end, cur_spk))
+        
+        # Adjust boundaries to ensure no overlaps and correct time range
+        final_segments = []
+        for i, (start, end, spk) in enumerate(merged):
+            adjusted_start = max(seg_start, start)
+            adjusted_end = min(seg_end, end)
+            
+            # Ensure minimum segment duration where possible
+            min_duration = min(0.3, segment_duration / 10)
+            if adjusted_end - adjusted_start < min_duration and i > 0:
+                # Try to extend by reducing previous segment
+                prev_start, prev_end, prev_spk = final_segments[-1]
+                if prev_end - prev_start > min_duration * 1.5:  # Only if previous segment is long enough
+                    gap_to_fill = min_duration - (adjusted_end - adjusted_start)
+                    prev_end -= min(gap_to_fill, prev_end - prev_start - min_duration)
+                    adjusted_start = prev_end
+                    final_segments[-1] = (prev_start, prev_end, prev_spk)
+            
+            if adjusted_end - adjusted_start >= min_duration:
+                final_segments.append((adjusted_start, adjusted_end, spk))
+        
+        return [(max(seg_start, s), min(seg_end, e), spk) for s, e, spk in final_segments]
 
     def _process_overlap_segment(self, audio_segment: torch.Tensor, speaker_embeddings: Dict[str, torch.Tensor],
                                    involved_speakers: List[str], seg_start: float, seg_end: float) -> List[Dict]:
@@ -898,8 +1001,6 @@ class EnhancedAudioProcessor:
         try:
             # Convert MP3 to WAV if needed, for PyAnnote compatibility
             original_file_path = file_path
-
-            # Convert MP3 to WAV if needed
             file_path = ensure_wav_format(file_path)
             
             # Load the audio (this will use converted WAV if available)
@@ -960,11 +1061,20 @@ class EnhancedAudioProcessor:
             # Detect overlap regions
             overlap_regions = self._detect_overlap_regions(diarization_result)
             
+            # Prepare for chronological processing
+            # Sort segments by start time to ensure proper time ordering
+            refined_segments.sort(key=lambda x: x[0])
+            
             # Process each segment
             processed_segments = []
             meta_counts = {'SPEAKER_A': 0, 'SPEAKER_B': 0}
             
-            for seg_start, seg_end, orig_speaker in refined_segments:
+            # Variables to track context for better continuity
+            previous_end = 0
+            previous_speaker = None
+            previous_transcript = ""
+            
+            for i, (seg_start, seg_end, orig_speaker) in enumerate(refined_segments):
                 # Skip segments that are too short
                 if (seg_end - seg_start) < self.config.min_segment_duration:
                     continue
@@ -972,14 +1082,24 @@ class EnhancedAudioProcessor:
                 # Check if segment contains overlap
                 is_overlap = False
                 involved_speakers = []
+                
                 for ov_start, ov_end, speakers in overlap_regions:
                     if max(seg_start, ov_start) < min(seg_end, ov_end):
                         is_overlap = True
                         involved_speakers = speakers
                         break
                 
+                # Extract the audio segment
                 audio_segment = self._extract_segment(audio, seg_start, seg_end)
                 spk_label = speaker_mapping.get(orig_speaker, "UNKNOWN")
+                
+                # Check for rapid exchange (current segment starts soon after previous)
+                is_rapid_exchange = False
+                if previous_speaker is not None and previous_speaker != orig_speaker:
+                    # Consider it rapid exchange if gap between segments is small
+                    if 0 < (seg_start - previous_end) < 0.5:  # 500ms threshold for rapid exchange
+                        is_rapid_exchange = True
+                        logging.info(f"Detected rapid exchange at {seg_start:.2f}s from {previous_speaker} to {spk_label}")
                 
                 # Process non-overlapping segments
                 if not is_overlap:
@@ -996,28 +1116,93 @@ class EnhancedAudioProcessor:
                             
                             for new_start, new_end, new_spk in new_segments:
                                 sub_audio = self._extract_segment(audio_segment, new_start - seg_start, new_end - seg_start)
+                                
+                                # Adjust context for transcription continuity
+                                initial_prompt = "This is a clear conversation with complete sentences."
+                                
+                                # Use previous transcript as context if it's the same speaker
+                                if new_spk == previous_speaker and seg_start - previous_end < 1.0:
+                                    initial_prompt = f"{previous_transcript.strip()} "
+                                
+                                # For rapid exchanges, use more context
+                                if is_rapid_exchange:
+                                    initial_prompt = "This is a fast-paced conversation with quick speaker changes. "
+                                    
                                 transcription = self.whisper_model.transcribe(
                                     sub_audio.squeeze().cpu().numpy(),
-                                    initial_prompt="This is a clear conversation with complete sentences.",
+                                    initial_prompt=initial_prompt,
                                     word_timestamps=True,
                                     condition_on_previous_text=self.config.condition_on_previous_text,
                                     temperature=self.config.temperature
                                 )
+                                
                                 final_label = speaker_mapping.get(new_spk, spk_label)
-                                processed_segments.append(AudioSegment(
+                                segment = AudioSegment(
                                     start=seg_start + new_start,
                                     end=seg_start + new_end,
                                     speaker_id=final_label,
                                     audio_tensor=sub_audio,
                                     is_overlap=False,
                                     transcription=transcription['text'],
-                                    confidence=1.0
-                                ))
+                                    confidence=1.0,
+                                    metadata={'rapid_exchange': is_rapid_exchange}
+                                )
+                                
+                                processed_segments.append(segment)
                                 meta_counts[final_label] = meta_counts.get(final_label, 0) + 1
+                                
+                                # Update context for next segment
+                                previous_end = seg_start + new_end
+                                previous_speaker = new_spk
+                                previous_transcript = transcription['text']
+                                
                             continue
-                
+                    
+                    # Standard segment processing for non-overlap segments
+                    # Choose appropriate initial prompt based on context
+                    initial_prompt = "This is a conversation between two people."
+                    
+                    # Use previous transcript as context if same speaker and close in time
+                    if orig_speaker == previous_speaker and seg_start - previous_end < 1.0:
+                        initial_prompt = f"{previous_transcript.strip()} "
+                    
+                    # For rapid exchanges, use a different prompt
+                    if is_rapid_exchange:
+                        initial_prompt = "This is a fast-paced conversation with quick speaker changes. "
+                    
+                    transcription = self.whisper_model.transcribe(
+                        audio_segment.squeeze().cpu().numpy(),
+                        initial_prompt=initial_prompt,
+                        word_timestamps=True,
+                        condition_on_previous_text=self.config.condition_on_previous_text,
+                        temperature=self.config.temperature
+                    )
+                    
+                    segment = AudioSegment(
+                        start=seg_start,
+                        end=seg_end,
+                        speaker_id=spk_label,
+                        audio_tensor=audio_segment,
+                        is_overlap=False,
+                        transcription=transcription['text'],
+                        confidence=1.0,
+                        metadata={'rapid_exchange': is_rapid_exchange}
+                    )
+                    
+                    processed_segments.append(segment)
+                    meta_counts[spk_label] = meta_counts.get(spk_label, 0) + 1
+                    
+                    # Update context for next segment
+                    previous_end = seg_end
+                    previous_speaker = orig_speaker
+                    previous_transcript = transcription['text']
+                    
                 # Process overlapping segments with special handling
-                if is_overlap:
+                else:
+                    # Reset context after overlap since it's a disruption
+                    previous_speaker = None
+                    previous_transcript = ""
+                    
                     mapped_profiles = {speaker_mapping.get(k, k): v for k, v in speaker_embeddings.items()}
                     refined_results = self._process_overlap_segment(
                         audio_segment,
@@ -1026,6 +1211,7 @@ class EnhancedAudioProcessor:
                         seg_start=seg_start,
                         seg_end=seg_end
                     )
+                    
                     for result in refined_results:
                         final_label = result['speaker_id']
                         processed_segments.append(AudioSegment(
@@ -1038,26 +1224,10 @@ class EnhancedAudioProcessor:
                             confidence=result.get('confidence', 0.5),
                             metadata={'overlap_speakers': involved_speakers}
                         ))
-                else:
-                    # Standard segment processing
-                    transcription = self.whisper_model.transcribe(
-                        audio_segment.squeeze().cpu().numpy(),
-                        initial_prompt="This is a conversation between two people.",
-                        word_timestamps=True,
-                        condition_on_previous_text=self.config.condition_on_previous_text,
-                        temperature=self.config.temperature
-                    )
-                    processed_segments.append(AudioSegment(
-                        start=seg_start,
-                        end=seg_end,
-                        speaker_id=spk_label,
-                        audio_tensor=audio_segment,
-                        is_overlap=False,
-                        transcription=transcription['text'],
-                        confidence=1.0
-                    ))
-                    meta_counts[spk_label] += 1
-            
+                        
+                    # Update previous_end regardless
+                    previous_end = seg_end
+                
             # Sort segments by start time
             processed_segments.sort(key=lambda x: x.start)
             
@@ -1067,7 +1237,8 @@ class EnhancedAudioProcessor:
                 'speaker_a_segments': meta_counts.get('SPEAKER_A', 0),
                 'speaker_b_segments': meta_counts.get('SPEAKER_B', 0),
                 'total_segments': len(processed_segments),
-                'speakers': list(speaker_mapping.values())
+                'speakers': list(speaker_mapping.values()),
+                'rapid_exchanges': sum(1 for s in processed_segments if s.metadata.get('rapid_exchange', False))
             }
             
             return {'segments': processed_segments, 'metadata': metadata}
