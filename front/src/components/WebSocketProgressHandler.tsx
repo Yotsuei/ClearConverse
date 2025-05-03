@@ -34,7 +34,6 @@ const WebSocketProgressHandler: React.FC<WebSocketProgressHandlerProps> = ({
       return;
     }
 
-
     // Clean up previous socket if exists
     if (socketRef.current && socketRef.current.readyState !== WebSocket.CLOSED) {
       socketRef.current.close();
@@ -48,7 +47,7 @@ const WebSocketProgressHandler: React.FC<WebSocketProgressHandlerProps> = ({
 
     ws.onopen = () => {
       console.log(`WebSocket connection established for task ${taskId}`);
-      reconnectAttempts.current = 0; // Reset reconnect attempts on successful connection
+      reconnectAttempts.current = 0; // Reset reconnect attempts on success
       onProgressUpdate(5, "Connected to server. Waiting for processing to begin...");
     };
 
@@ -56,31 +55,26 @@ const WebSocketProgressHandler: React.FC<WebSocketProgressHandlerProps> = ({
       try {
         const data = JSON.parse(event.data);
         
-        // Handle initial connection message
-        if (data.status === "connected") {
-          return;
-        }
-        
-        // Special handling for cancellation messages - always show these
-        if (data.message && data.message.toLowerCase().includes('cancel')) {
-          onProgressUpdate(data.progress || 99, data.message);
-          
-          // If progress is 100, this is a completed cancellation
-          if (data.progress >= 100) {
-            // Check if there's a download URL
-            checkTaskResult(taskId);
-          }
-          return;
-        }
-        
-        // Regular progress updates
+        // Handle progress updates
         if (data.progress !== undefined && data.message !== undefined) {
           onProgressUpdate(data.progress, data.message);
-        }
-        
-        // Check if processing is complete
-        if (data.progress >= 100) {
-          checkTaskResult(taskId);
+          
+          // For 100% progress, check the message to determine next action
+          if (data.progress >= 100) {
+            if (data.message && data.message.toLowerCase().includes('cancel')) {
+              // Cancelled - no need to fetch result
+              console.log("Transcription was cancelled");
+            } 
+            else if (data.message && data.message.toLowerCase().includes('error')) {
+              // Error occurred - no need to fetch result
+              console.log(`Transcription error: ${data.message}`);
+            }
+            else {
+              // Completed successfully - check for result
+              console.log("Transcription completed, fetching result");
+              checkTaskResult(taskId);
+            }
+          }
         }
       } catch (err) {
         console.error('Error parsing WebSocket message:', err);
@@ -118,6 +112,9 @@ const WebSocketProgressHandler: React.FC<WebSocketProgressHandlerProps> = ({
   useEffect(() => {
     if (taskId) {
       connectWebSocket();
+      
+      // Also check status immediately in case of completed/cancelled state
+      checkTaskResult(taskId);
     }
 
     // Clean up on unmount
@@ -133,7 +130,7 @@ const WebSocketProgressHandler: React.FC<WebSocketProgressHandlerProps> = ({
 
   const checkTaskResult = async (taskId: string) => {
     try {
-      const response = await fetch(`${apiBaseUrl}/task/${taskId}/result`);
+      const response = await fetch(`${apiBaseUrl}/task/${taskId}/status`);
       
       if (!response.ok) {
         throw new Error(`Failed to fetch task result: ${response.status} ${response.statusText}`);
@@ -141,18 +138,22 @@ const WebSocketProgressHandler: React.FC<WebSocketProgressHandlerProps> = ({
       
       const result = await response.json();
       
-      if (result.download_url) {
+      if (result.status === "completed" && result.download_url) {
+        onProgressUpdate(100, "Processing complete!");
         onComplete(result.download_url);
-      } else if (result.status === "cancelled") {
-        // Handle cancelled state properly
+      } 
+      else if (result.status === "cancelled") {
         onProgressUpdate(100, result.message || "Transcription was cancelled");
-        // Don't try to fetch transcription for cancelled tasks
-      } else if (result.error) {
-        onProgressUpdate(100, `Error: ${result.error}`);
+      } 
+      else if (result.status === "error") {
+        onProgressUpdate(100, `Error: ${result.message || "Unknown error"}`);
+      }
+      else if (result.progress !== undefined) {
+        // Regular progress update
+        onProgressUpdate(result.progress, result.message || "Processing in progress...");
       }
     } catch (err) {
       console.error('Error checking task result:', err);
-      onProgressUpdate(100, `Failed to get task result: ${(err as Error).message}`);
     }
   };
 

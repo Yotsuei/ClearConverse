@@ -11,9 +11,9 @@ import asyncio
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
-from threading import Event
-from concurrent.futures import ThreadPoolExecutor
 import time
+import multiprocessing
+import psutil
 
 # FastAPI imports
 from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, BackgroundTasks, Form
@@ -82,6 +82,9 @@ def load_environment():
     }
 
 env_config = load_environment()
+
+# Dictionary to track running transcription processes
+active_processes = {}
 
 # =============================================================================
 # Data Classes
@@ -246,17 +249,7 @@ def download_file_from_url(url, output_path=None):
 def download_file_from_google_drive(file_id, output_path=None):
     """
     Download a file from Google Drive using a more robust approach that handles confirmation tokens.
-    
-    Args:
-        file_id: The Google Drive file ID
-        output_path: Optional path to save the file, if None a temporary file will be created
-        
-    Returns:
-        The path to the downloaded file
     """
-    import requests
-    import tempfile
-    
     URL = "https://drive.google.com/uc?export=download"
     
     if not output_path:
@@ -413,105 +406,14 @@ def ensure_wav_format(file_path: str) -> str:
         logging.error(f"Error during MP3 conversion: {str(e)}")
         return file_path  # Return original file path if exception occurs
 
-
 # =============================================================================
 # Task Tracking System
 # =============================================================================
 
-# Task pool executor for running background transcription processes
-task_executor = ThreadPoolExecutor(max_workers=4)
-
-# Dictionary to store active task information
-active_tasks = {}
-
-class TaskInfo:
-    """Enhanced class to track information about a running task with corrected priority handling"""
-    def __init__(self, task_id: str):
-        self.task_id = task_id
-        self.cancel_event = Event()  # Event that can be set to signal cancellation
-        self.future = None  # Will store the future from ThreadPoolExecutor
-        self.status = "pending"  # States: pending, running, completed, cancelled, error
-        self.start_time = datetime.now()
-        self.end_time = None
-        self.priority_cancel = False  # Flag to indicate cancellation should take priority
-        self.has_transcript = False  # Flag to indicate if a transcript was created
-        
-    def cancel(self) -> bool:
-        """Signal cancellation for this task - simplified to always succeed"""
-        # Always mark as cancelled immediately
-        self.priority_cancel = True
-        self.cancel_event.set()
-        self.status = "cancelled"
-        self.end_time = datetime.now()
-        logging.info(f"Task {self.task_id} immediately marked as cancelled")
-        return True
-
-    def mark_running(self):
-        """Mark the task as running"""
-        # Only change status if no priority cancel is set and not already completed
-        if not self.priority_cancel and self.status != "completed":
-            self.status = "running"
-        else:
-            self.status = "cancelling"
-        
-    def mark_completed(self):
-        """Mark the task as completed unless cancellation has priority"""
-        # Check if cancellation should take priority - only applies to tasks not already completed
-        if self.priority_cancel and self.status != "completed":
-            self.status = "cancelled"
-            self.end_time = datetime.now()
-            logging.info(f"Task {self.task_id} completion overridden by cancellation priority")
-        else:
-            # Only update to completed if not already in completed/cancelled/error state
-            if self.status not in ["completed", "cancelled", "error"]:
-                self.status = "completed"
-                self.end_time = datetime.now()
-                logging.info(f"Task {self.task_id} marked as completed")
-        
-    def mark_error(self, error_message: str):
-        """Mark the task as having an error unless cancellation has priority or already completed"""
-        # Check if cancellation should take priority
-        if self.priority_cancel and self.status != "completed":
-            self.status = "cancelled"
-            self.end_time = datetime.now()
-            logging.info(f"Task {self.task_id} error status overridden by cancellation priority")
-        elif self.status != "completed":
-            # Don't override completed status with error
-            self.status = "error" 
-            self.end_time = datetime.now()
-            logging.info(f"Task {self.task_id} marked as error: {error_message}")
-        
-    def mark_cancelled(self):
-        """Mark the task as cancelled - don't override completed status if transcript exists"""
-        # Check if task is completed with transcript
-        if self.status == "completed" and self.has_transcript:
-            logging.info(f"Not changing status of completed task {self.task_id} with transcript")
-            return
-            
-        self.status = "cancelled"
-        self.end_time = datetime.now()
-        self.priority_cancel = True
-        logging.info(f"Task {self.task_id} marked as cancelled")
-        
-    def set_has_transcript(self, has_transcript: bool = True):
-        """Mark that this task has a transcript"""
-        self.has_transcript = has_transcript
-        logging.info(f"Task {self.task_id} set has_transcript={has_transcript}")
-        
-    def is_active(self) -> bool:
-        """Check if the task is still active (pending or running)"""
-        return self.status in ["pending", "running", "cancelling"]
-
-# Function to check for cancellation and raise exception if cancelled
-def check_cancellation(cancel_event: Event):
-    """Check if cancellation was requested and raise CancellationError if so"""
-    if cancel_event and cancel_event.is_set():
-        raise CancellationError("Task cancelled by user")
-
-# Custom exception for cancellation
-class CancellationError(Exception):
-    """Exception raised when a task is cancelled"""
-    pass
+# State storage
+uploaded_files = {}
+progress_store = {}
+result_store = {}
 
 # =============================================================================
 # Enhanced Audio Processor Class
@@ -934,31 +836,8 @@ class EnhancedAudioProcessor:
         
         return [(max(seg_start, s), min(seg_end, e), spk) for s, e, spk in final_segments]
     
-    def _diarize_with_cancellation(self, file_path, min_speakers, max_speakers, cancel_event=None):
-        """Run the speaker diarization process with cancellation monitoring"""
-        
-        # Check for cancellation before starting diarization
-        if cancel_event and cancel_event.is_set():
-            logging.info("Cancellation detected before starting diarization")
-            raise CancellationError("Cancellation requested")
-            
-        # Start a separate thread to monitor for cancellation
-        if cancel_event:
-            stop_check = Event()
-            
-            def monitor_cancellation():
-                while not stop_check.is_set():
-                    if cancel_event.is_set():
-                        logging.info("Cancellation detected during diarization")
-                        # We can't directly stop PyAnnote, but this helps with logging
-                        break
-                    time.sleep(0.1)  # Check every 100ms for more responsiveness
-            
-            import threading
-            monitor_thread = threading.Thread(target=monitor_cancellation)
-            monitor_thread.daemon = True
-            monitor_thread.start()
-        
+    def _diarize(self, file_path, min_speakers, max_speakers):
+        """Run the speaker diarization process"""
         try:
             # Run the actual diarization
             result = self.diarization(
@@ -966,43 +845,19 @@ class EnhancedAudioProcessor:
                 min_speakers=min_speakers,
                 max_speakers=max_speakers
             )
-            
-            # Stop the monitoring thread
-            if cancel_event:
-                stop_check.set()
-            
-            # Check for cancellation after diarization completes
-            if cancel_event and cancel_event.is_set():
-                logging.info("Cancellation detected after diarization completed")
-                raise CancellationError("Cancellation requested")
-                
             return result
         except Exception as e:
-            # Check if exception is due to cancellation
-            if cancel_event and cancel_event.is_set():
-                logging.info("Diarization interrupted due to cancellation")
-                raise CancellationError("Cancellation requested") from e
-            else:
-                logging.error(f"Error in diarization: {str(e)}")
-                raise
+            logging.error(f"Error in diarization: {str(e)}")
+            raise
 
     def _process_overlap_segment(self, audio_segment: torch.Tensor, speaker_embeddings: Dict[str, torch.Tensor],
-                               involved_speakers: List[str], seg_start: float, seg_end: float, 
-                               cancel_event: Event = None) -> List[Dict]:
+                               involved_speakers: List[str], seg_start: float, seg_end: float) -> List[Dict]:
         logging.info(f"Processing overlap segment: {seg_start:.2f}s-{seg_end:.2f}s")
-        
-        # Check for cancellation
-        if cancel_event and cancel_event.is_set():
-            raise CancellationError("Cancellation requested during overlap processing")
         
         refined_regions = self._resegment_overlap(audio_segment, seg_start, seg_end, speaker_embeddings)
         
         results = []
         for new_start, new_end, spk in refined_regions:
-            # Check for cancellation before each region processing
-            if cancel_event and cancel_event.is_set():
-                raise CancellationError("Cancellation requested during overlap processing")
-                
             subsegment = self._extract_segment(audio_segment, new_start - seg_start, new_end - seg_start)
             
             try:
@@ -1010,10 +865,6 @@ class EnhancedAudioProcessor:
                 
                 best_source, best_confidence = None, -1.0
                 for idx in range(separated.shape[-1]):
-                    # Check for cancellation during source evaluation
-                    if cancel_event and cancel_event.is_set():
-                        raise CancellationError("Cancellation requested during source evaluation")
-                        
                     source = separated[..., idx]
                     source = source / (torch.max(torch.abs(source)) + 1e-8)
                     embedding = self._extract_embedding(source)
@@ -1027,16 +878,11 @@ class EnhancedAudioProcessor:
                 best_source = best_source if best_source is not None else subsegment
                 source_np = best_source.squeeze().cpu().numpy()
                 
-                # Check for cancellation before transcription
-                if cancel_event and cancel_event.is_set():
-                    raise CancellationError("Cancellation requested before transcription")
-                
-                # Use safer transcription method
-                transcription = self._safe_transcribe(
+                # Use transcription method
+                transcription = self._transcribe(
                     source_np,
                     initial_prompt="This is a single speaker talking.",
-                    temperature=self.config.temperature,
-                    cancel_event=cancel_event
+                    temperature=self.config.temperature
                 )
                 
                 results.append({
@@ -1045,9 +891,6 @@ class EnhancedAudioProcessor:
                     'speaker_id': spk,
                     'confidence': best_confidence
                 })
-            except CancellationError:
-                # Re-raise cancellation errors
-                raise
             except Exception as e:
                 logging.error(f"Error processing overlap subsegment: {e}")
                 # Add a partial result with error information
@@ -1146,15 +989,10 @@ class EnhancedAudioProcessor:
         logging.info(f"Regular segments: {sum(1 for s in segments if not s.is_overlap)}")
 
     def run(self, input_file, output_dir: str = "processed_audio", debug_mode: bool = False, 
-        progress_callback=None, cancel_event: Event = None):
+        progress_callback=None):
         try:
             if progress_callback:
                 progress_callback(5, "Starting processing")
-                
-            # Check for cancellation
-            if cancel_event and cancel_event.is_set():
-                logging.info("Processing cancelled before starting")
-                return None, None, None
                     
             # Create output directory
             os.makedirs(output_dir, exist_ok=True)
@@ -1162,24 +1000,14 @@ class EnhancedAudioProcessor:
             
             if progress_callback:
                 progress_callback(30, "Running file processing")
-                
-            # Check for cancellation
-            if cancel_event and cancel_event.is_set():
-                logging.info("Processing cancelled during initialization")
-                return None, None, None
                     
-            # Process the audio file with cancellation check
-            results = self.process_file(input_file, cancel_event=cancel_event)
-            if results is None:  # Processing was cancelled
+            # Process the audio file
+            results = self.process_file(input_file)
+            if results is None:  # Processing failed for some reason
                 return None, None, None
             
             if progress_callback:
                 progress_callback(60, "Saving processed segments")
-                
-            # Check for cancellation
-            if cancel_event and cancel_event.is_set():
-                logging.info("Processing cancelled after file processing")
-                return None, None, None
                 
             # Check if we have valid segments with transcriptions
             if 'segments' not in results or not results['segments']:
@@ -1202,11 +1030,6 @@ class EnhancedAudioProcessor:
                 
             if progress_callback:
                 progress_callback(80, "Saving transcript")
-                
-            # Check for cancellation
-            if cancel_event and cancel_event.is_set():
-                logging.info("Processing cancelled after saving segments")
-                return None, None, None
                 
             # Generate and save transcript
             transcript_path = os.path.join(output_dir, "transcript.txt")
@@ -1238,18 +1061,10 @@ class EnhancedAudioProcessor:
             traceback.print_exc()
             raise
     
-    def _safe_transcribe(self, audio_np, initial_prompt="", word_timestamps=False, 
-                   condition_on_previous_text=True, temperature=0.0, cancel_event=None):
-        """
-        Safely run whisper transcribe with more detailed logging
-        """
-        # Check cancellation before starting
-        if cancel_event and cancel_event.is_set():
-            logging.info(f"Cancellation detected before whisper transcription")
-            raise CancellationError("Transcription cancelled")
-        
+    def _transcribe(self, audio_np, initial_prompt="", word_timestamps=False, 
+                   condition_on_previous_text=True, temperature=0.0):
+        """Simplified transcribe method"""
         try:
-            # Run the actual transcription
             result = self.whisper_model.transcribe(
                 audio_np,
                 initial_prompt=initial_prompt,
@@ -1257,50 +1072,21 @@ class EnhancedAudioProcessor:
                 condition_on_previous_text=condition_on_previous_text,
                 temperature=temperature
             )
-            
-            # Check cancellation after completion
-            if cancel_event and cancel_event.is_set():
-                logging.info(f"Cancellation detected after whisper transcription")
-                raise CancellationError("Transcription cancelled")
-                
             return result
-        except CancellationError:
-            raise
         except Exception as e:
             logging.error(f"Error in whisper transcription: {str(e)}")
-            
-            # Check if the error was due to cancellation
-            if cancel_event and cancel_event.is_set():
-                raise CancellationError("Transcription cancelled during error")
-                
-            # Re-raise with more context
             raise RuntimeError(f"Transcription failed: {str(e)}")
 
-    def process_file(self, file_path: str, cancel_event: Event = None) -> Dict:
+    def process_file(self, file_path: str) -> Dict:
         try:
-            # Check for cancellation right at the beginning
-            if cancel_event and cancel_event.is_set():
-                logging.info(f"Cancellation detected at start of process_file")
-                raise CancellationError("Cancellation requested")
-                
             # Convert MP3 to WAV if needed, for PyAnnote compatibility
             original_file_path = file_path
             file_path = ensure_wav_format(file_path)
-            
-            # Check for cancellation before loading audio
-            if cancel_event and cancel_event.is_set():
-                logging.info(f"Cancellation detected before loading audio")
-                raise CancellationError("Cancellation requested")
                 
             # Load the audio (this will use converted WAV if available)
             audio, sample_rate = self.load_audio(original_file_path)
             audio_duration = audio.shape[-1] / sample_rate
             logging.info(f"Processing audio file: {audio_duration:.2f} seconds")
-            
-            # Check for cancellation before VAD
-            if cancel_event and cancel_event.is_set():
-                logging.info(f"Cancellation detected before VAD")
-                raise CancellationError("Cancellation requested")
                 
             # Run Voice Activity Detection on the WAV file
             logging.info("Running Voice Activity Detection...")
@@ -1308,52 +1094,26 @@ class EnhancedAudioProcessor:
             vad_intervals = get_pyannote_vad_intervals(vad_result)
             logging.info(f"VAD detected {len(vad_intervals)} speech intervals")
             
-            # Check for cancellation after VAD and before diarization
-            if cancel_event and cancel_event.is_set():
-                logging.info(f"Cancellation detected after VAD")
-                raise CancellationError("Cancellation requested")
-                
             # Run Speaker Diarization on the WAV file
             logging.info("Running Speaker Diarization...")
-            diarization_result = self._diarize_with_cancellation(
+            diarization_result = self._diarize(
                 file_path,
                 min_speakers=self.config.min_speakers,
-                max_speakers=self.config.max_speakers,
-                cancel_event=cancel_event
+                max_speakers=self.config.max_speakers
             )
-            
-            # Check for cancellation after diarization
-            if cancel_event and cancel_event.is_set():
-                logging.info(f"Cancellation detected after diarization")
-                raise CancellationError("Cancellation requested")
                 
             # Process and merge segments
             raw_segments = [(segment.start, segment.end, speaker)
                             for segment, _, speaker in diarization_result.itertracks(yield_label=True)]
             logging.info(f"Diarization found {len(raw_segments)} raw segments")
-            
-            # Check for cancellation
-            if cancel_event and cancel_event.is_set():
-                logging.info(f"Cancellation detected after raw segments processing")
-                raise CancellationError("Cancellation requested")
                 
             merged_segments = merge_diarization_segments(raw_segments, self.config.merge_gap_threshold)
             logging.info(f"After merging: {len(merged_segments)} segments")
-            
-            # Check for cancellation
-            if cancel_event and cancel_event.is_set():
-                logging.info(f"Cancellation detected after segment merging")
-                raise CancellationError("Cancellation requested")
                 
             # Refine segments with VAD if enabled
             refined_segments = []
             if self.config.use_vad_refinement:
                 for start, end, speaker in merged_segments:
-                    # Check for cancellation during refinement loop
-                    if cancel_event and cancel_event.is_set():
-                        logging.info(f"Cancellation detected during VAD refinement")
-                        raise CancellationError("Cancellation requested")
-                        
                     refined = refine_segment_with_vad((start, end), vad_intervals)
                     if refined and (refined[1] - refined[0] >= self.config.min_segment_duration):
                         refined_segments.append((refined[0], refined[1], speaker))
@@ -1361,19 +1121,9 @@ class EnhancedAudioProcessor:
             else:
                 refined_segments = merged_segments
                 
-            # Check for cancellation before speaker profile building
-            if cancel_event and cancel_event.is_set():
-                logging.info(f"Cancellation detected before speaker profile building")
-                raise CancellationError("Cancellation requested")
-                
             # Build speaker profiles
             speaker_embeddings = self._build_speaker_profiles(audio, diarization_result)
             logging.info(f"Created embeddings for {len(speaker_embeddings)} speakers")
-            
-            # Check for cancellation after speaker profile building
-            if cancel_event and cancel_event.is_set():
-                logging.info(f"Cancellation detected after speaker profile building")
-                raise CancellationError("Cancellation requested")
                 
             # Map speaker IDs to friendly names
             speaker_counts = Counter(speaker for _, _, speaker in refined_segments)
@@ -1390,11 +1140,6 @@ class EnhancedAudioProcessor:
             
             # Detect overlap regions
             overlap_regions = self._detect_overlap_regions(diarization_result)
-            
-            # Check for cancellation before segment processing
-            if cancel_event and cancel_event.is_set():
-                logging.info(f"Cancellation detected before segment processing")
-                raise CancellationError("Cancellation requested")
                 
             # Prepare for chronological processing
             # Sort segments by start time to ensure proper time ordering
@@ -1409,20 +1154,10 @@ class EnhancedAudioProcessor:
             previous_speaker = None
             previous_transcript = ""
             
-            # Add explicit cancellation check before segment loop
-            if cancel_event and cancel_event.is_set():
-                logging.info(f"Cancellation detected before segment loop")
-                raise CancellationError("Cancellation requested")
-            
-            # Process each segment - check cancellation before EVERY segment
+            # Process each segment
             segment_count = len(refined_segments)
             
             for i, (seg_start, seg_end, orig_speaker) in enumerate(refined_segments):
-                # Check for cancellation BEFORE EACH segment - not just every 3
-                if cancel_event and cancel_event.is_set():
-                    logging.info(f"Cancellation detected at segment {i+1}/{segment_count}")
-                    raise CancellationError("Cancellation requested during segment processing")
-                    
                 # Skip segments that are too short
                 if (seg_end - seg_start) < self.config.min_segment_duration:
                     continue
@@ -1451,11 +1186,6 @@ class EnhancedAudioProcessor:
                 
                 # Process non-overlapping segments
                 if not is_overlap:
-                    # Check for cancellation before processing segment
-                    if cancel_event and cancel_event.is_set():
-                        logging.info(f"Cancellation detected before processing segment {i+1}")
-                        raise CancellationError("Cancellation requested")
-                        
                     embedding = self._extract_embedding(audio_segment)
                     
                     # Check embedding similarity and potentially re-analyze segment
@@ -1581,11 +1311,6 @@ class EnhancedAudioProcessor:
                     # Update previous_end regardless
                     previous_end = seg_end
                     
-            # Check for cancellation before finalizing
-            if cancel_event and cancel_event.is_set():
-                logging.info(f"Cancellation detected before finalizing")
-                raise CancellationError("Cancellation requested")
-                
             # Sort segments by start time
             processed_segments.sort(key=lambda x: x.start)
             
@@ -1598,20 +1323,12 @@ class EnhancedAudioProcessor:
                 'speakers': list(speaker_mapping.values()),
                 'rapid_exchanges': sum(1 for s in processed_segments if s.metadata.get('rapid_exchange', False))
             }
-            
-            # Final cancellation check before returning
-            if cancel_event and cancel_event.is_set():
-                logging.info(f"Cancellation detected at end of processing")
-                raise CancellationError("Cancellation requested")
                 
             return {'segments': processed_segments, 'metadata': metadata}
-        except CancellationError:
-            logging.info(f"Processing for {file_path} was cancelled")
-            return None
         except Exception as e:
             logging.error(f"Error in process_file: {e}")
             traceback.print_exc()
-            raise
+            return None
 
 # =============================================================================
 # FastAPI App Configuration
@@ -1627,9 +1344,6 @@ async def cleanup_old_files(max_age_hours=1):
     """
     Periodically clean up old temporary files and processed audio directories
     that are older than the specified age in hours.
-    
-    Args:
-        max_age_hours: Maximum age of files in hours before they're deleted
     """
     while True:
         try:
@@ -1657,8 +1371,8 @@ async def cleanup_old_files(max_age_hours=1):
                                 del progress_store[task_id]
                             if task_id in result_store:
                                 del result_store[task_id]
-                            if task_id in active_tasks:
-                                del active_tasks[task_id]
+                            if task_id in active_processes:
+                                del active_processes[task_id]
                             if task_id in uploaded_files:
                                 del uploaded_files[task_id]
                         except Exception as e:
@@ -1688,8 +1402,8 @@ async def cleanup_old_files(max_age_hours=1):
                                 del progress_store[task_id]
                             if task_id in result_store:
                                 del result_store[task_id]
-                            if task_id in active_tasks:
-                                del active_tasks[task_id]
+                            if task_id in active_processes:
+                                del active_processes[task_id]
                             if task_id in uploaded_files:
                                 del uploaded_files[task_id]
                     except Exception as e:
@@ -1730,16 +1444,10 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 temp_uploads = Path("temp_uploads")
 temp_uploads.mkdir(exist_ok=True)
 
-
 load_dotenv()  # this loads variables from .env into the environment
 AUTH_TOKEN = env_config['hf_auth_token']
 config = Config(auth_token=AUTH_TOKEN)
 processor = EnhancedAudioProcessor(config)
-
-# State storage
-uploaded_files = {}
-progress_store = {}
-result_store = {}
 
 # =============================================================================
 # Helper Functions for Endpoints
@@ -1750,112 +1458,53 @@ def update_progress(task_id: str, percent: int, message: str):
     progress_store[task_id] = {"progress": percent, "message": message}
     logging.info(f"Task {task_id}: {percent}% - {message}")
 
-async def process_audio_with_progress(task_id: str, file_path: str):
-    """Process audio file with progress updates and proper cancellation support"""
+def run_transcription_process(task_id, file_path, output_dir):
+    """Function to run in a separate process for transcription"""
+    # Set up logging for this process
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    logging.info(f"Starting transcription process for task {task_id}")
+    
+    task_output_dir = os.path.join(output_dir, task_id)
+    os.makedirs(task_output_dir, exist_ok=True)
+    
+    # Initialize processor in this process
+    from dotenv import load_dotenv
+    load_dotenv()
+    AUTH_TOKEN = os.getenv('HF_AUTH_TOKEN', '')
+    config = Config(auth_token=AUTH_TOKEN)
+    processor = EnhancedAudioProcessor(config)
+    
+    # Function to write progress to file that the main process can read
+    def progress_callback(percent, message):
+        progress_file = os.path.join(task_output_dir, "progress.json")
+        progress_data = {"progress": percent, "message": message}
+        with open(progress_file, "w") as f:
+            json.dump(progress_data, f)
+        logging.info(f"Task {task_id}: {percent}% - {message}")
+    
     try:
-        task_info = active_tasks.get(task_id)
-        if not task_info:
-            logging.error(f"Task {task_id} not found in active_tasks")
-            return
-            
-        task_info.mark_running()
-        task_output_dir = os.path.join(OUTPUT_DIR, task_id)
-        os.makedirs(task_output_dir, exist_ok=True)
+        # Run the processing with progress callback
+        input_file, transcript, transcript_path = processor.run(
+            file_path, 
+            output_dir=task_output_dir,
+            debug_mode=False,
+            progress_callback=progress_callback
+        )
         
-        update_progress(task_id, 5, "Starting processing")
+        # Final progress update
+        progress_callback(100, "Transcription complete")
         
-        # Check for cancellation before even starting
-        if task_info.cancel_event.is_set():
-            task_info.mark_cancelled()
-            result_store[task_id] = {"status": "cancelled", "message": "Transcription was cancelled"}
-            update_progress(task_id, 100, "Processing cancelled")
-            logging.info(f"Task {task_id} was cancelled before processing started")
-            return
-        
-        # Run the processing with progress callback and cancellation event
-        try:
-            input_file, transcript, transcript_path = processor.run(
-                file_path, 
-                output_dir=task_output_dir, 
-                debug_mode=False, 
-                progress_callback=lambda p, m: update_progress(task_id, 30 + int(p * 0.7), m),
-                cancel_event=task_info.cancel_event
-            )
-            
-            # Check if processing was successful
-            if input_file is not None and transcript_path is not None:
-                # Verify the transcript file exists and has content
-                if os.path.exists(transcript_path) and os.path.getsize(transcript_path) > 0:
-                    logging.info(f"Transcript file {transcript_path} exists with {os.path.getsize(transcript_path)} bytes")
-                    
-                    # Read a sample of the transcript for logging
-                    try:
-                        with open(transcript_path, 'r', encoding='utf-8') as f:
-                            sample = f.read(200)
-                        logging.info(f"Transcript sample: {sample}...")
-                    except Exception as e:
-                        logging.error(f"Error reading transcript sample: {e}")
-                    
-                    # Check cancellation again after processing is done
-                    if task_info.cancel_event.is_set():
-                        task_info.mark_cancelled()
-                        result_store[task_id] = {"status": "cancelled", "message": "Transcription was cancelled"}
-                        update_progress(task_id, 100, "Processing cancelled")
-                        logging.info(f"Task {task_id} was cancelled after run completed but before finalizing")
-                        return
-                    
-                    # Process was completed successfully with valid transcript
-                    task_info.set_has_transcript(True)
-                    task_info.mark_completed()
-                    result_store[task_id] = {"download_url": f"/download/{task_id}/transcript.txt"}
-                    update_progress(task_id, 100, "Transcription complete")
-                else:
-                    # Transcript file is missing or empty
-                    logging.error(f"Transcript file is missing or empty: {transcript_path}")
-                    if os.path.exists(transcript_path):
-                        logging.error(f"File exists but size is {os.path.getsize(transcript_path)} bytes")
-                    
-                    task_info.mark_error("Transcript file is empty or missing")
-                    result_store[task_id] = {"error": "No transcription data generated"}
-                    update_progress(task_id, 100, "Error: No transcription data generated")
-            else:
-                # Something went wrong or the task was cancelled
-                if task_info.cancel_event.is_set():
-                    task_info.mark_cancelled()
-                    result_store[task_id] = {"status": "cancelled", "message": "Transcription was cancelled"}
-                    update_progress(task_id, 100, "Processing cancelled")
-                else:
-                    task_info.mark_error("Processing failed to generate transcript")
-                    result_store[task_id] = {"error": "Processing failed to generate transcript"}
-                    update_progress(task_id, 100, "Processing failed")
-        except CancellationError:
-            # Task was explicitly cancelled
-            task_info.mark_cancelled()
-            result_store[task_id] = {"status": "cancelled", "message": "Transcription was cancelled"}
-            update_progress(task_id, 100, "Processing cancelled")
-            logging.info(f"Task {task_id} was cancelled during processing")
-        except Exception as e:
-            # Check cancellation again to see if the error was due to cancellation
-            if task_info.cancel_event.is_set():
-                task_info.mark_cancelled()
-                result_store[task_id] = {"status": "cancelled", "message": "Transcription was cancelled"}
-                update_progress(task_id, 100, "Processing cancelled")
-                logging.info(f"Task {task_id} was cancelled during error handling")
-                return
-                
-            # An error occurred during processing
-            error_msg = str(e)
-            task_info.mark_error(error_msg)
-            update_progress(task_id, 100, f"Error: {error_msg}")
-            result_store[task_id] = {"error": error_msg}
-            logging.error(f"Error processing audio: {e}")
-            traceback.print_exc()
+        # Write a completion flag
+        with open(os.path.join(task_output_dir, "completed.txt"), "w") as f:
+            f.write("Transcription completed")
     except Exception as e:
-        # Handle any other exceptions
-        update_progress(task_id, 100, f"Error: {str(e)}")
-        result_store[task_id] = {"error": str(e)}
-        logging.error(f"Error in process_audio_with_progress: {e}")
-        traceback.print_exc()
+        logging.error(f"Error in transcription process: {e}")
+        # Write an error file
+        with open(os.path.join(task_output_dir, "error.txt"), "w") as f:
+            f.write(f"Error: {str(e)}")
+        
+        # Write final error progress
+        progress_callback(100, f"Error: {str(e)}")
 
 # =============================================================================
 # API Endpoints
@@ -2088,7 +1737,7 @@ async def upload_url(url: str = Form(...)):
     })
 
 @app.post("/transcribe/{task_id}")
-async def transcribe_task(task_id: str, background_tasks: BackgroundTasks):
+async def transcribe_task(task_id: str):
     """Start transcription process for a previously uploaded file"""
     if task_id not in uploaded_files:
         raise HTTPException(status_code=404, detail="Task ID not found. Please upload a file or URL first.")
@@ -2096,19 +1745,46 @@ async def transcribe_task(task_id: str, background_tasks: BackgroundTasks):
     file_path = uploaded_files[task_id]
     update_progress(task_id, 0, "Task queued for transcription")
     
-    # Cancel any existing task with the same ID
-    if task_id in active_tasks:
-        old_task = active_tasks[task_id]
-        if old_task.is_active():
-            old_task.cancel()
-            logging.info(f"Cancelled previous active task {task_id}")
+    # Cancel any existing process with the same task ID
+    if task_id in active_processes:
+        try:
+            old_process_info = active_processes[task_id]
+            parent = psutil.Process(old_process_info['pid'])
+            
+            # Kill child processes first
+            for child in parent.children(recursive=True):
+                try:
+                    child.kill()
+                except:
+                    pass
+                    
+            # Kill parent
+            parent.kill()
+            logging.info(f"Terminated previous process for task {task_id}")
+        except Exception as e:
+            logging.error(f"Error terminating previous process: {e}")
     
-    # Create a new task
-    task_info = TaskInfo(task_id)
-    active_tasks[task_id] = task_info
+    # Create task output directory
+    task_output_dir = os.path.join(OUTPUT_DIR, task_id)
+    os.makedirs(task_output_dir, exist_ok=True)
     
-    # Run the task asynchronously
-    asyncio.create_task(process_audio_with_progress(task_id, file_path))
+    # Launch transcription as a separate process
+    process = multiprocessing.Process(
+        target=run_transcription_process,
+        args=(task_id, file_path, OUTPUT_DIR)
+    )
+    process.start()
+    
+    # Store the process info for later cancellation
+    active_processes[task_id] = {
+        'process': process,
+        'pid': process.pid,
+        'start_time': time.time(),
+        'file_path': file_path
+    }
+    
+    update_progress(task_id, 5, "Starting transcription process")
+    logging.info(f"Started transcription process for task {task_id} with PID {process.pid}")
     
     return JSONResponse(content={"task_id": task_id})
 
@@ -2122,59 +1798,275 @@ async def preview_audio(filename: str):
     return FileResponse(str(file_path), media_type="audio/mpeg", filename=filename)
 
 @app.post("/cancel/{task_id}")
-async def cancel_task(task_id: str, background_tasks: BackgroundTasks):
-    """
-    Cancel an ongoing transcription task with immediate feedback
-    """
-    # Immediately update progress regardless of task state
+async def cancel_task(task_id: str):
+    """Forcibly cancel a transcription process"""
     update_progress(task_id, 99, "Cancelling transcription...")
     
-    # Add to background tasks to clean up files
-    background_tasks.add_task(clean_up_task_files, task_id)
+    if task_id in active_processes:
+        try:
+            # Get the process info
+            process_info = active_processes[task_id]
+            
+            try:
+                # First try to kill using psutil for better child process cleanup
+                parent = psutil.Process(process_info['pid'])
+                
+                # Kill child processes first (recursive)
+                for child in parent.children(recursive=True):
+                    try:
+                        child.kill()
+                    except:
+                        pass
+                
+                # Then kill the parent
+                parent.kill()
+                logging.info(f"Killed process tree for task {task_id}")
+            except:
+                # Fallback to basic termination
+                process = process_info['process']
+                if process.is_alive():
+                    process.terminate()
+                    logging.info(f"Terminated process for task {task_id}")
+            
+            # Remove from active processes
+            del active_processes[task_id]
+            
+            # Mark as cancelled in progress and result store
+            update_progress(task_id, 100, "Transcription cancelled")
+            result_store[task_id] = {"status": "cancelled", "message": "Transcription was cancelled"}
+            
+            # Create a cancelled marker file
+            task_output_dir = os.path.join(OUTPUT_DIR, task_id)
+            os.makedirs(task_output_dir, exist_ok=True)
+            with open(os.path.join(task_output_dir, "cancelled.txt"), "w") as f:
+                f.write("Transcription was cancelled")
+            
+            return JSONResponse(content={"status": "cancelled", "message": "Transcription cancelled successfully"})
+        except Exception as e:
+            logging.error(f"Error cancelling process: {e}")
+            # Still report cancellation to the user
+            update_progress(task_id, 100, "Transcription cancelled")
+            result_store[task_id] = {"status": "cancelled", "message": "Transcription was cancelled"}
+            return JSONResponse(content={"status": "cancelled", "error": str(e)})
     
-    if task_id not in active_tasks:
-        # Create a dummy task info for the case where the task exists but isn't in our tracking
-        dummy_task = TaskInfo(task_id)
-        dummy_task.mark_error("Task not found in tracking system")
-        active_tasks[task_id] = dummy_task
-        
-        logging.warning(f"Task {task_id} not found in active_tasks, creating dummy")
-        # Final update to show cancelled
-        update_progress(task_id, 100, "Transcription cancelled")
-        
-        # Add to result store to ensure proper status reporting
-        result_store[task_id] = {
-            "status": "cancelled", 
-            "message": "Transcription was cancelled"
-        }
-        
+    # Task not found in active processes, still acknowledge cancellation
+    update_progress(task_id, 100, "Transcription cancelled")
+    result_store[task_id] = {"status": "cancelled", "message": "Transcription was cancelled"}
+    return JSONResponse(content={"status": "cancelled"})
+
+@app.get("/task/{task_id}/status")
+async def get_task_status(task_id: str):
+    """Check if a task has completed in the separate process"""
+    task_dir = os.path.join(OUTPUT_DIR, task_id)
+    
+    # Check if task directory exists
+    if not os.path.exists(task_dir):
+        return JSONResponse(content={"status": "not_found"})
+    
+    # Check for cancellation file
+    if os.path.exists(os.path.join(task_dir, "cancelled.txt")):
         return JSONResponse(content={
-            "status": "not_found", 
-            "message": "Task not found but marked as cancelled",
-            "progress": 100
+            "status": "cancelled",
+            "message": "Transcription was cancelled"
         })
     
-    task_info = active_tasks[task_id]
+    # Check for completion file
+    if os.path.exists(os.path.join(task_dir, "completed.txt")):
+        # Check for transcript file
+        transcript_path = os.path.join(task_dir, "transcript.txt")
+        if os.path.exists(transcript_path):
+            return JSONResponse(content={
+                "status": "completed",
+                "download_url": f"/download/{task_id}/transcript.txt"
+            })
     
-    # Force cancellation and always mark as cancelled
-    task_info.cancel()
-    task_info.priority_cancel = True
-    task_info.status = "cancelled"
+    # Check for error file
+    if os.path.exists(os.path.join(task_dir, "error.txt")):
+        try:
+            with open(os.path.join(task_dir, "error.txt"), "r") as f:
+                error_message = f.read()
+            return JSONResponse(content={"status": "error", "message": error_message})
+        except:
+            return JSONResponse(content={"status": "error", "message": "Unknown error occurred"})
     
-    # Override the result store
-    result_store[task_id] = {
-        "status": "cancelled", 
-        "message": "Transcription was cancelled"
-    }
+    # Check for progress information
+    progress_file = os.path.join(task_dir, "progress.json")
+    if os.path.exists(progress_file):
+        try:
+            with open(progress_file, "r") as f:
+                progress_data = json.load(f)
+            
+            # Also update the in-memory progress store
+            if task_id not in progress_store or progress_store[task_id] != progress_data:
+                progress_store[task_id] = progress_data
+                
+            return JSONResponse(content=progress_data)
+        except:
+            pass
     
-    # Final update about cancellation
-    update_progress(task_id, 100, "Transcription cancelled")
+    # Check if process is still running
+    if task_id in active_processes:
+        process_info = active_processes[task_id]
+        elapsed_time = time.time() - process_info['start_time']
+        
+        # Use in-memory progress if available
+        if task_id in progress_store:
+            return JSONResponse(content={
+                **progress_store[task_id],
+                "elapsed_seconds": elapsed_time
+            })
+        
+        # Default progress
+        return JSONResponse(content={
+            "status": "processing",
+            "progress": 5,
+            "message": "Processing in progress...",
+            "elapsed_seconds": elapsed_time
+        })
     
-    return JSONResponse(content={
-        "status": "cancelled",
-        "message": "Cancellation request processed",
-        "progress": 100
-    })
+    # Default to in-memory progress
+    if task_id in progress_store:
+        return JSONResponse(content=progress_store[task_id])
+    
+    # Default response if nothing else applies
+    return JSONResponse(content={"status": "unknown", "progress": 0, "message": "Unknown status"})
+
+@app.get("/transcription/{task_id}")
+async def get_transcription(task_id: str):
+    """Get the transcription text for a completed task"""
+    transcript_file = Path(OUTPUT_DIR) / task_id / "transcript.txt"
+    
+    logging.info(f"Transcription requested for task {task_id}")
+    
+    if not transcript_file.exists():
+        logging.error(f"Transcript file not found for task {task_id}: {transcript_file}")
+        
+        # Check if the task was processed but the file might have been cleaned up
+        if task_id in result_store:
+            # If we have a result but no file, try to provide a helpful error
+            logging.error(f"Task {task_id} is in result_store but file not found")
+            return JSONResponse(status_code=404, content={
+                "error": "Transcript file not found",
+                "detail": "The transcript file may have been deleted or the task was cancelled"
+            })
+        else:
+            # General case when no data exists for this task
+            logging.error(f"Task {task_id} not found in result_store")
+            return JSONResponse(status_code=404, content={
+                "error": "Transcription not found",
+                "detail": "No transcription data found for this task ID"
+            })
+    
+    # File exists, check if it has content
+    file_size = transcript_file.stat().st_size
+    logging.info(f"Found transcript file for task {task_id}, size: {file_size} bytes")
+    
+    if file_size == 0:
+        logging.error(f"Transcript file for task {task_id} is empty")
+        return JSONResponse(status_code=400, content={
+            "error": "Empty transcript file",
+            "detail": "The transcript file exists but contains no data"
+        })
+    
+    try:
+        with open(transcript_file, "r", encoding="utf-8") as f:
+            transcript = f.read()
+        
+        if not transcript.strip():
+            logging.error(f"Transcript file for task {task_id} contains only whitespace")
+            return JSONResponse(status_code=400, content={
+                "error": "Empty transcript content",
+                "detail": "The transcript file contains only whitespace"
+            })
+        
+        # Log a preview of the transcript
+        preview = transcript[:100] + "..." if len(transcript) > 100 else transcript
+        logging.info(f"Returning transcript for task {task_id}: {preview}")
+        
+        return JSONResponse(content={"task_id": task_id, "transcription": transcript})
+    except Exception as e:
+        logging.error(f"Error reading transcript file {transcript_file}: {e}")
+        return JSONResponse(status_code=500, content={
+            "error": "Failed to read transcript",
+            "detail": str(e)
+        })
+
+@app.get("/task/{task_id}/status")
+async def get_task_status(task_id: str):
+    """Check if a task has completed in the separate process"""
+    task_dir = os.path.join(OUTPUT_DIR, task_id)
+    
+    # Check if task directory exists
+    if not os.path.exists(task_dir):
+        return JSONResponse(content={"status": "not_found"})
+    
+    # Check for cancellation file
+    if os.path.exists(os.path.join(task_dir, "cancelled.txt")):
+        return JSONResponse(content={
+            "status": "cancelled",
+            "message": "Transcription was cancelled"
+        })
+    
+    # Check for completion file
+    if os.path.exists(os.path.join(task_dir, "completed.txt")):
+        # Check for transcript file
+        transcript_path = os.path.join(task_dir, "transcript.txt")
+        if os.path.exists(transcript_path):
+            return JSONResponse(content={
+                "status": "completed",
+                "download_url": f"/download/{task_id}/transcript.txt"
+            })
+    
+    # Check for error file
+    if os.path.exists(os.path.join(task_dir, "error.txt")):
+        try:
+            with open(os.path.join(task_dir, "error.txt"), "r") as f:
+                error_message = f.read()
+            return JSONResponse(content={"status": "error", "message": error_message})
+        except:
+            return JSONResponse(content={"status": "error", "message": "Unknown error occurred"})
+    
+    # Check for progress information
+    progress_file = os.path.join(task_dir, "progress.json")
+    if os.path.exists(progress_file):
+        try:
+            with open(progress_file, "r") as f:
+                progress_data = json.load(f)
+            
+            # Also update the in-memory progress store
+            if task_id not in progress_store or progress_store[task_id] != progress_data:
+                progress_store[task_id] = progress_data
+                
+            return JSONResponse(content=progress_data)
+        except:
+            pass
+    
+    # Check if process is still running
+    if task_id in active_processes:
+        process_info = active_processes[task_id]
+        elapsed_time = time.time() - process_info['start_time']
+        
+        # Use in-memory progress if available
+        if task_id in progress_store:
+            return JSONResponse(content={
+                **progress_store[task_id],
+                "elapsed_seconds": elapsed_time
+            })
+        
+        # Default progress
+        return JSONResponse(content={
+            "status": "processing",
+            "progress": 5,
+            "message": "Processing in progress...",
+            "elapsed_seconds": elapsed_time
+        })
+    
+    # Default to in-memory progress
+    if task_id in progress_store:
+        return JSONResponse(content=progress_store[task_id])
+    
+    # Default response if nothing else applies
+    return JSONResponse(content={"status": "unknown", "progress": 0, "message": "Unknown status"})
 
 async def clean_up_task_files(task_id: str):
     """Clean up files associated with a cancelled task"""
@@ -2301,98 +2193,115 @@ from starlette.websockets import WebSocketDisconnect
 
 @app.websocket("/ws/progress/{task_id}")
 async def progress_ws(websocket: WebSocket, task_id: str):
-    """WebSocket endpoint for real-time progress updates with improved cancellation support"""
     await websocket.accept()
     
     try:
-        # First check if task is already cancelled
-        if task_id in result_store and result_store[task_id].get("status") == "cancelled":
-            # Send the cancellation status immediately
-            await websocket.send_json({
-                "progress": 100,
-                "message": "Transcription cancelled"
-            })
+        # First check if task is already cancelled or completed
+        task_dir = os.path.join(OUTPUT_DIR, task_id)
+        
+        # Check for cancellation, completion, or error files upfront
+        is_cancelled = os.path.exists(os.path.join(task_dir, "cancelled.txt"))
+        is_completed = os.path.exists(os.path.join(task_dir, "completed.txt"))
+        is_error = os.path.exists(os.path.join(task_dir, "error.txt"))
+        
+        if is_cancelled:
+            await websocket.send_json({"progress": 100, "message": "Transcription cancelled"})
+            return
+            
+        if is_completed and os.path.exists(os.path.join(task_dir, "transcript.txt")):
+            await websocket.send_json({"progress": 100, "message": "Transcription complete"})
+            return
+            
+        if is_error:
+            try:
+                with open(os.path.join(task_dir, "error.txt"), "r") as f:
+                    error_message = f.read()
+                await websocket.send_json({"progress": 100, "message": f"Error: {error_message}"})
+            except:
+                await websocket.send_json({"progress": 100, "message": "Error occurred during processing"})
             return
         
-        # Get current progress data
-        current_data = progress_store.get(task_id, {"progress": 0, "message": "Initializing..."})
+        # Send initial progress from memory store or create default
+        current_progress = progress_store.get(task_id, {"progress": 5, "message": "Processing in progress..."})
+        await websocket.send_json(current_progress)
         
-        # Send initial data
-        await websocket.send_json(current_data)
+        # Poll for updates from progress.json file and check for completion/cancellation
+        last_progress = current_progress
+        poll_interval = 0.5  # seconds
         
-        # Get task info
-        task_info = active_tasks.get(task_id)
-        
-        # Exit early if task is already completed
-        if current_data.get("progress", 0) >= 100 or (task_info and not task_info.is_active()):
-            return
-        
-        # Poll for updates - reduced polling interval for more responsiveness
         while True:
-            # Use shorter sleep time for more responsive updates
-            await asyncio.sleep(0.2)  # Reduced from 0.5 to 0.2 seconds
+            await asyncio.sleep(poll_interval)
             
-            # Check if task has been cancelled in result_store
-            if task_id in result_store and result_store[task_id].get("status") == "cancelled":
-                # If cancelled, immediately send the cancellation update
-                cancel_data = {"progress": 100, "message": "Transcription cancelled"}
+            # Check for cancellation file
+            if os.path.exists(os.path.join(task_dir, "cancelled.txt")):
+                await websocket.send_json({"progress": 100, "message": "Transcription cancelled"})
+                break
+                
+            # Check for completion file
+            if os.path.exists(os.path.join(task_dir, "completed.txt")):
+                await websocket.send_json({"progress": 100, "message": "Transcription complete"})
+                break
+                
+            # Check for error file
+            if os.path.exists(os.path.join(task_dir, "error.txt")):
                 try:
-                    await websocket.send_json(cancel_data)
-                except RuntimeError:
-                    # Connection was closed while we were sending
+                    with open(os.path.join(task_dir, "error.txt"), "r") as f:
+                        error_message = f.read()
+                    await websocket.send_json({"progress": 100, "message": f"Error: {error_message}"})
+                except:
+                    await websocket.send_json({"progress": 100, "message": "Error occurred during processing"})
+                break
+            
+            # Check for progress file
+            progress_file = os.path.join(task_dir, "progress.json")
+            if os.path.exists(progress_file):
+                try:
+                    with open(progress_file, "r") as f:
+                        progress_data = json.load(f)
+                    
+                    # Only send if different from last update
+                    if progress_data != last_progress:
+                        await websocket.send_json(progress_data)
+                        last_progress = progress_data
+                        progress_store[task_id] = progress_data
+                except:
                     pass
-                break
             
-            # Re-check task status
-            task_info = active_tasks.get(task_id)
-            
-            # Check specifically for cancellation event
-            if task_info and task_info.cancel_event.is_set():
-                # If the task is being cancelled, immediately update the progress
-                cancel_data = {"progress": 99, "message": "Cancelling transcription..."}
+            # Check if process is still alive, if not, might be stuck
+            if task_id in active_processes:
+                process_info = active_processes[task_id]
+                process = process_info.get('process')
                 
-                # Only send if it's different from current data
-                if cancel_data != current_data:
-                    try:
-                        await websocket.send_json(cancel_data)
-                        current_data = cancel_data
-                    except RuntimeError:
-                        # Connection was closed while we were sending
-                        break
-                
-                # Check if we need to finish the cancellation (if status is now cancelled)
-                if task_info.status == "cancelled":
-                    final_data = {"progress": 100, "message": "Transcription cancelled"}
-                    try:
-                        await websocket.send_json(final_data)
-                    except RuntimeError:
-                        pass
-                    break
-            
-            # Normal progress updates
-            new_data = progress_store.get(task_id, current_data)
-            
-            # Send update only if data changed
-            if new_data != current_data:
-                try:
-                    await websocket.send_json(new_data)
-                    current_data = new_data
-                except RuntimeError:
-                    # Connection was closed while we were sending
-                    break
-            
-            # Stop polling once task is complete
-            if new_data.get("progress", 0) >= 100 or (task_info and not task_info.is_active()):
-                break
-                
+                if process and not process.is_alive():
+                    # Process no longer running, but no completion/error files
+                    # Either still finalizing or something went wrong
+                    if not (os.path.exists(os.path.join(task_dir, "completed.txt")) or 
+                            os.path.exists(os.path.join(task_dir, "error.txt")) or
+                            os.path.exists(os.path.join(task_dir, "cancelled.txt"))):
+                        # Wait a bit longer in case files are being written
+                        await asyncio.sleep(2)
+                        
+                        # Check again for completion/error files
+                        if not (os.path.exists(os.path.join(task_dir, "completed.txt")) or 
+                                os.path.exists(os.path.join(task_dir, "error.txt")) or
+                                os.path.exists(os.path.join(task_dir, "cancelled.txt"))):
+                            # Process ended but no status files - likely an error
+                            await websocket.send_json({
+                                "progress": 100, 
+                                "message": "Process ended unexpectedly"
+                            })
+                            # Create an error file
+                            with open(os.path.join(task_dir, "error.txt"), "w") as f:
+                                f.write("Process ended unexpectedly")
+                            break
     except WebSocketDisconnect:
-        # Client disconnected, just log at debug level since this is normal
-        logging.debug(f"WebSocket client disconnected for task {task_id}")
-    except Exception as e:
-        # Log other errors but don't crash
-        logging.error(f"WebSocket error for task {task_id}: {str(e)}")
-    finally:
         pass
+    except Exception as e:
+        logging.error(f"Error in WebSocket handler: {e}")
+        try:
+            await websocket.send_json({"progress": 100, "message": f"Error: {str(e)}"})
+        except:
+            pass
 
 @app.get("/download/{file_path:path}")
 async def download_transcript(file_path: str):
@@ -2403,8 +2312,6 @@ async def download_transcript(file_path: str):
         
     return FileResponse(path=str(transcript_path), media_type="text/plain", filename=transcript_path.name)
 
-# Keep only the enhanced original cleanup endpoint and its POST version for page refresh
-
 @app.delete("/cleanup/{task_id}")
 async def cleanup(task_id: str):
     """Clean up all files and directories associated with a task ID,
@@ -2413,17 +2320,36 @@ async def cleanup(task_id: str):
     
     # Check if the task is marked as completed and has a transcript
     is_completed_with_transcript = False
-    task_info = active_tasks.get(task_id)
     transcript_file = Path(OUTPUT_DIR) / task_id / "transcript.txt"
+    completed_file = Path(OUTPUT_DIR) / task_id / "completed.txt"
     
-    if task_info and task_info.status == "completed" and transcript_file.exists():
+    if completed_file.exists() and transcript_file.exists():
         is_completed_with_transcript = True
         logging.info(f"Task {task_id} is completed with transcript, preserving files")
     
     # First try to cancel ongoing task if it's still running
-    if task_id in active_tasks and active_tasks[task_id].is_active():
-        active_tasks[task_id].cancel()
-        logging.info(f"Cancelled ongoing task {task_id}")
+    if task_id in active_processes:
+        try:
+            process_info = active_processes[task_id]
+            try:
+                # Kill process if still running
+                parent = psutil.Process(process_info['pid'])
+                for child in parent.children(recursive=True):
+                    try:
+                        child.kill()
+                    except:
+                        pass
+                parent.kill()
+            except:
+                process = process_info.get('process')
+                if process and process.is_alive():
+                    process.terminate()
+                    
+            # Remove from active processes
+            del active_processes[task_id]
+            logging.info(f"Cancelled ongoing task {task_id}")
+        except Exception as e:
+            logging.error(f"Error cancelling process: {e}")
     
     # Track all removed files and directories
     files_removed = 0
@@ -2470,12 +2396,7 @@ async def cleanup(task_id: str):
         del result_store[task_id]
         logging.info(f"Cleared result data for task {task_id}")
     
-    # 5. Remove task from active_tasks if present
-    if task_id in active_tasks:
-        del active_tasks[task_id]
-        logging.info(f"Removed task {task_id} from active tasks")
-    
-    # 6. Remove task from uploaded_files if present and not completed with transcript
+    # 5. Remove task from uploaded_files if present and not completed with transcript
     if task_id in uploaded_files and not is_completed_with_transcript:
         del uploaded_files[task_id]
         logging.info(f"Removed task {task_id} from uploaded files")
@@ -2490,7 +2411,6 @@ async def cleanup(task_id: str):
         }
     })
 
-# Add this endpoint to your FastAPI app
 @app.post("/admin/cleanup")
 async def manual_cleanup(hours: int = 1):
     """Manually trigger cleanup of files older than the specified hours"""
