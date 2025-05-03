@@ -66,9 +66,9 @@ const App: React.FC = () => {
       if (!isCancelled) {
         fetchTranscription(taskId);
       } else {
-        // If cancelled, just update UI state
+        // If cancelled, just update UI state without trying to fetch the transcript
         setIsProcessing(false);
-        // Don't clear the message, keep showing "Cancelled"
+        // Don't clear the audio source or taskId, keep them for potential retry
       }
     }
   }, [processingProgress, taskId, processingMessage]);  
@@ -85,6 +85,34 @@ const App: React.FC = () => {
       return () => clearInterval(pollInterval);
     }
   }, [connectionAttempts, isWsConnected, isProcessing, taskId]);
+
+  useEffect(() => {
+    if (audioSource.previewUrl && !isProcessing) {
+      // Check model loading status periodically
+      const checkModelLoading = async () => {
+        try {
+          const response = await fetch(`${API_BASE_URL}/model-loading-status`);
+          if (response.ok) {
+            const data = await response.json();
+            
+            if (data.status === "loading") {
+              // Update UI to show model loading is happening in background
+              setProcessingMessage(`Preparing models: ${data.message}`);
+              setProcessingProgress(data.progress);
+            }
+          }
+        } catch (error) {
+          console.error("Error checking model loading status:", error);
+        }
+      };
+      
+      // Check immediately and then every 2 seconds
+      checkModelLoading();
+      const interval = setInterval(checkModelLoading, 2000);
+      
+      return () => clearInterval(interval);
+    }
+  }, [audioSource.previewUrl, isProcessing]);
 
   // Function to poll task progress as fallback
   const pollTaskProgress = async (taskId: string) => {
@@ -128,18 +156,18 @@ const App: React.FC = () => {
       return;
     }
     
-    // Normal progress handling
-    // Ensure we never go backwards in progress
-    if (progress >= processingProgress || progress === 0) {
-      setProcessingProgress(progress);
-    }
-    
-    setProcessingMessage(message);
-    
+    // For completion (100%), we still want to set the progress
     if (progress === 100) {
+      setProcessingProgress(100);
+      setProcessingMessage(message || "Processing complete!");
       setIsWsConnected(true);
+      return;
     }
-  };  
+    
+    // For all other progress updates, just update the message without changing the numeric progress
+    // This allows the animation to continue running while updating the text
+    setProcessingMessage(message || "Processing in progress...");
+  }  
 
   const handleProcessingComplete = (downloadUrl: string) => {
     if (downloadUrl) {
@@ -232,63 +260,56 @@ const App: React.FC = () => {
 
   // Cancel ongoing transcription
   const cancelTranscription = () => {
-    // Only attempt to cancel if we have a task ID and we're in processing state
-    // and we're not already cancelling
     if (taskId && (isUploading || isProcessing) && !isCancelling) {
-      // Set the cancelling state to disable the button
       setIsCancelling(true);
-      
-      // Immediately update UI state to show we're cancelling
       setProcessingMessage("Cancelling transcription...");
-      setProcessingProgress(99);  // Set to 99% to show the cancellation is in progress
+      setProcessingProgress(99);
       
-      // First, attempt to cancel the backend processing
       fetch(`${API_BASE_URL}/cancel/${taskId}`, { method: 'POST' })
         .then(response => {
           if (!response.ok) {
             console.error('Failed to cancel task on server');
-            // Even if the server call fails, keep showing cancelling
           }
           return response.json();
         })
         .then(data => {
           console.log('Cancellation response:', data);
           
-          // Update UI state to show cancellation
-          setIsUploading(false);
-          setUploadProgress(0);
-          setIsProcessing(false);
-          setProcessingProgress(100); // Set to 100 to indicate process is complete (cancelled)
-          setProcessingMessage('Transcription cancelled');
-          
-          // After a brief delay, reset the app state for a fresh start
-          setTimeout(() => {
-            resetState();
-          }, 2000);
-        })
-        .catch(err => {
-          console.error('Error cancelling task:', err);
-          
-          // Still update UI state even if the cancellation API fails
+          // KEEP the audioSource
           setIsUploading(false);
           setUploadProgress(0);
           setIsProcessing(false);
           setProcessingProgress(100);
           setProcessingMessage('Transcription cancelled');
           
-          // After a brief delay, reset the app state
           setTimeout(() => {
-            resetState();
+            setIsCancelling(false);
+            // Reset processing state only
+            setIsProcessing(false); 
+            setProcessingProgress(0);
+            setProcessingMessage('Preparing to process...');
+          }, 2000);
+        })
+        .catch(err => {
+          console.error('Error cancelling task:', err);
+          
+          setIsUploading(false);
+          setUploadProgress(0);
+          setIsProcessing(false);
+          setProcessingProgress(100);
+          setProcessingMessage('Transcription cancelled');
+          
+          setTimeout(() => {
+            setIsCancelling(false);
           }, 2000);
         });
     } else {
-      // Just reset frontend state if we don't have a task or aren't processing
       setIsUploading(false);
       setUploadProgress(0);
       setIsProcessing(false);
       setProcessingProgress(0);
     }
-  };  
+  };
 
   // Start the transcription process
   const startTranscription = async () => {
@@ -348,9 +369,20 @@ const App: React.FC = () => {
       const response = await fetch(`${API_BASE_URL}/transcription/${taskId}`);
       
       if (!response.ok) {
-        if (response.status === 413) {
-          throw new Error(`File size exceeds the ${config.upload.maxFileSizeMB}MB limit. Please upload a smaller file.`);
+        // Special case for cancelled tasks - 202 status code
+        if (response.status === 202) {
+          console.log("Task was cancelled, no transcription to fetch");
+          setIsProcessing(false);
+          return; // Exit without showing error
         }
+        
+        if (response.status === 404) {
+          // For 404 errors, don't show an alert - this is handled elsewhere
+          console.log('Transcription not found (likely cancelled or not yet created)');
+          setIsProcessing(false);
+          return;
+        }
+        
         throw new Error(`Failed to fetch transcription: ${response.status} ${response.statusText}`);
       }
       
@@ -364,11 +396,14 @@ const App: React.FC = () => {
       }
     } catch (error) {
       console.error('Error fetching transcription:', error);
-      alert(`Failed to get transcription: ${(error as Error).message}`);
+      // Only show alerts for errors other than 404s or cancelled tasks
+      if (!error.message.includes('404') && !error.message.includes('202')) {
+        alert(`Failed to get transcription: ${(error as Error).message}`);
+      }
     } finally {
       setIsProcessing(false);
     }
-  };
+  };  
 
   // Handle transcription button click
   const handleTranscribe = () => {
@@ -516,7 +551,12 @@ const App: React.FC = () => {
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-lg font-semibold text-gray-200">Upload Progress</h3>
               </div>
-              <ProgressBar progress={uploadProgress} type="upload" onCancel={cancelTranscription} />
+              <ProgressBar 
+                type="upload" 
+                onCancel={cancelTranscription} 
+                message={uploadProgress === 100 ? "Upload complete" : undefined}
+                isComplete={uploadProgress === 100}
+              />
             </div>
           )}
 
@@ -527,10 +567,10 @@ const App: React.FC = () => {
                 <h3 className="text-lg font-semibold text-gray-200">Processing Progress</h3>
               </div>
               <ProgressBar 
-                progress={processingProgress} 
                 type="processing" 
                 onCancel={cancelTranscription}
                 message={processingMessage}
+                isComplete={processingProgress === 100}
               />
             </div>
           )}
