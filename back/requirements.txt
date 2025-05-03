@@ -22,4 +22,3 @@ ffmpeg-python
 requests
 validators
 safetensors
-psutil
