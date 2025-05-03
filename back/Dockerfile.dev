@@ -16,7 +16,10 @@ RUN apt-get update && apt-get install -y \
 
 # Install Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir --verbose -r requirements.txt || (cat /tmp/pip-error.log && exit 1)
+# Install Python dependencies with verbose output and error logging
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir --verbose -r requirements.txt || \
+    (cat /tmp/pip-log.txt && exit 1)
 
 # Create directories for data persistence (if they don't exist)
 RUN mkdir -p models processed_audio temp_uploads
