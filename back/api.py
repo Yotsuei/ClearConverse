@@ -420,11 +420,21 @@ result_store = {}
 # =============================================================================
 
 class EnhancedAudioProcessor:
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, load_models_immediately: bool = False):
         self.config = config
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.resampler = None
-        self._initialize_models()
+        
+        # Model state tracking
+        self.models_loaded = {
+            'whisper': False,
+            'resepformer': False,
+            'pyannote': False
+        }
+        
+        # Only load models if specified
+        if load_models_immediately:
+            self._initialize_models()
 
     def _initialize_models(self):
         logging.info(f"Initializing models on {self.device}...")
@@ -440,6 +450,47 @@ class EnhancedAudioProcessor:
         self._initialize_pyannote_models(cache_dir)
         
         logging.info("Models initialized successfully!")
+
+    # Add more granular loading methods that update progress
+    def load_models_with_progress(self, progress_callback=None):
+        """Load models with progress updates"""
+        try:
+            if progress_callback:
+                progress_callback(5, "Initializing model environment...")
+                
+            # Load RESepFormer (25% of loading time)
+            if not self.models_loaded['resepformer']:
+                if progress_callback:
+                    progress_callback(10, "Loading RESepFormer...")
+                self._load_resepformer_model(env_config['model_cache_dir'])
+                self.models_loaded['resepformer'] = True
+            
+            # Load Whisper (25% of loading time)
+            if not self.models_loaded['whisper']:
+                if progress_callback:
+                    progress_callback(35, "Loading Whisper...")
+                self._load_whisper_model(env_config['model_cache_dir'])
+                self.models_loaded['whisper'] = True
+            
+            # Load PyAnnote (50% of loading time - these are larger)
+            if not self.models_loaded['pyannote']:
+                if progress_callback:
+                    progress_callback(60, "Loading speaker diarization tool...")
+                self._initialize_pyannote_models(env_config['model_cache_dir'])
+                self.models_loaded['pyannote'] = True
+            
+            if progress_callback:
+                progress_callback(90, "Models loaded, preparing for processing...")
+            
+            return True
+        except Exception as e:
+            logging.error(f"Error loading models: {e}")
+            if progress_callback:
+                progress_callback(100, f"Error loading models: {str(e)}")
+            return False
+    
+    def models_are_loaded(self):
+        return all(self.models_loaded.values())
 
     def _load_whisper_model(self, cache_dir):
         """Load the fine-tuned Whisper model if available, otherwise use the base model"""
@@ -989,10 +1040,15 @@ class EnhancedAudioProcessor:
         logging.info(f"Regular segments: {sum(1 for s in segments if not s.is_overlap)}")
 
     def run(self, input_file, output_dir: str = "processed_audio", debug_mode: bool = False, 
-        progress_callback=None):
+            progress_callback=None):
         try:
             if progress_callback:
                 progress_callback(5, "Starting processing")
+            
+            # Ensure models are loaded before processing
+            if not self.models_are_loaded():
+                if not self.load_models_with_progress(progress_callback):
+                    return None, None, None
                     
             # Create output directory
             os.makedirs(output_dir, exist_ok=True)
@@ -1447,7 +1503,17 @@ temp_uploads.mkdir(exist_ok=True)
 load_dotenv()  # this loads variables from .env into the environment
 AUTH_TOKEN = env_config['hf_auth_token']
 config = Config(auth_token=AUTH_TOKEN)
-processor = EnhancedAudioProcessor(config)
+processor = None
+
+def get_processor(load_models=False):
+    """Get or create the processor instance (lazy loading)"""
+    global processor
+    if processor is None:
+        AUTH_TOKEN = os.getenv('HF_AUTH_TOKEN', '')
+        config = Config(auth_token=AUTH_TOKEN)
+        processor = EnhancedAudioProcessor(config, load_models_immediately=load_models)
+    return processor
+
 
 # =============================================================================
 # Helper Functions for Endpoints
@@ -1467,12 +1533,11 @@ def run_transcription_process(task_id, file_path, output_dir):
     task_output_dir = os.path.join(output_dir, task_id)
     os.makedirs(task_output_dir, exist_ok=True)
     
-    # Initialize processor in this process
-    from dotenv import load_dotenv
-    load_dotenv()
-    AUTH_TOKEN = os.getenv('HF_AUTH_TOKEN', '')
-    config = Config(auth_token=AUTH_TOKEN)
-    processor = EnhancedAudioProcessor(config)
+    # Check if already completed to prevent duplicate processing
+    completed_marker = os.path.join(task_output_dir, "completed.txt")
+    if os.path.exists(completed_marker):
+        logging.info(f"Task {task_id} already completed, skipping")
+        return
     
     # Function to write progress to file that the main process can read
     def progress_callback(percent, message):
@@ -1483,6 +1548,16 @@ def run_transcription_process(task_id, file_path, output_dir):
         logging.info(f"Task {task_id}: {percent}% - {message}")
     
     try:
+        # Initialize processor with lazy loading
+        from dotenv import load_dotenv
+        load_dotenv()
+        AUTH_TOKEN = os.getenv('HF_AUTH_TOKEN', '')
+        config = Config(auth_token=AUTH_TOKEN)
+        processor = EnhancedAudioProcessor(config, load_models_immediately=False)
+        
+        # First update - models will start loading during run() call
+        progress_callback(5, "Starting model initialization...")
+        
         # Run the processing with progress callback
         input_file, transcript, transcript_path = processor.run(
             file_path, 
@@ -1491,17 +1566,27 @@ def run_transcription_process(task_id, file_path, output_dir):
             progress_callback=progress_callback
         )
         
+        # Delete the in_progress marker
+        in_progress_marker = os.path.join(task_output_dir, "in_progress.txt")
+        if os.path.exists(in_progress_marker):
+            os.remove(in_progress_marker)
+        
         # Final progress update
         progress_callback(100, "Transcription complete")
         
         # Write a completion flag
-        with open(os.path.join(task_output_dir, "completed.txt"), "w") as f:
-            f.write("Transcription completed")
+        with open(completed_marker, "w") as f:
+            f.write(f"Transcription completed at {datetime.now().isoformat()}")
     except Exception as e:
         logging.error(f"Error in transcription process: {e}")
         # Write an error file
         with open(os.path.join(task_output_dir, "error.txt"), "w") as f:
             f.write(f"Error: {str(e)}")
+        
+        # Delete the in_progress marker
+        in_progress_marker = os.path.join(task_output_dir, "in_progress.txt")
+        if os.path.exists(in_progress_marker):
+            os.remove(in_progress_marker)
         
         # Write final error progress
         progress_callback(100, f"Error: {str(e)}")
@@ -1736,6 +1821,7 @@ async def upload_url(url: str = Form(...)):
         "preview_url": f"/preview/{filename}" 
     })
 
+# Update the transcription endpoint
 @app.post("/transcribe/{task_id}")
 async def transcribe_task(task_id: str):
     """Start transcription process for a previously uploaded file"""
@@ -1743,6 +1829,25 @@ async def transcribe_task(task_id: str):
         raise HTTPException(status_code=404, detail="Task ID not found. Please upload a file or URL first.")
         
     file_path = uploaded_files[task_id]
+    
+    # Check if this task is already processing or completed
+    task_dir = os.path.join(OUTPUT_DIR, task_id)
+    completed_marker = os.path.join(task_dir, "completed.txt")
+    in_progress_marker = os.path.join(task_dir, "in_progress.txt") 
+    
+    # If already completed, return immediately
+    if os.path.exists(completed_marker):
+        return JSONResponse(content={"task_id": task_id, "status": "already_completed"})
+    
+    # If already in progress, return immediately 
+    if os.path.exists(in_progress_marker):
+        return JSONResponse(content={"task_id": task_id, "status": "already_in_progress"})
+    
+    # Mark as in progress first
+    os.makedirs(task_dir, exist_ok=True)
+    with open(in_progress_marker, "w") as f:
+        f.write(f"Started at {datetime.now().isoformat()}")
+    
     update_progress(task_id, 0, "Task queued for transcription")
     
     # Cancel any existing process with the same task ID
@@ -1763,10 +1868,6 @@ async def transcribe_task(task_id: str):
             logging.info(f"Terminated previous process for task {task_id}")
         except Exception as e:
             logging.error(f"Error terminating previous process: {e}")
-    
-    # Create task output directory
-    task_output_dir = os.path.join(OUTPUT_DIR, task_id)
-    os.makedirs(task_output_dir, exist_ok=True)
     
     # Launch transcription as a separate process
     process = multiprocessing.Process(
@@ -1799,7 +1900,7 @@ async def preview_audio(filename: str):
 
 @app.post("/cancel/{task_id}")
 async def cancel_task(task_id: str):
-    """Forcibly cancel a transcription process"""
+    """Forcibly cancel a transcription process while preserving the uploaded file"""
     update_progress(task_id, 99, "Cancelling transcription...")
     
     if task_id in active_processes:
@@ -1835,11 +1936,22 @@ async def cancel_task(task_id: str):
             update_progress(task_id, 100, "Transcription cancelled")
             result_store[task_id] = {"status": "cancelled", "message": "Transcription was cancelled"}
             
-            # Create a cancelled marker file
+            # IMPORTANT: Only delete the processed_audio directory, keep the uploaded file!
             task_output_dir = os.path.join(OUTPUT_DIR, task_id)
+            if os.path.exists(task_output_dir):
+                try:
+                    shutil.rmtree(task_output_dir)
+                    logging.info(f"Removed processed audio directory for task {task_id}")
+                except Exception as e:
+                    logging.error(f"Failed to remove processed audio directory: {e}")
+            
+            # Create a cancelled marker file in the processed_audio directory
             os.makedirs(task_output_dir, exist_ok=True)
             with open(os.path.join(task_output_dir, "cancelled.txt"), "w") as f:
                 f.write("Transcription was cancelled")
+                
+            # Keep the file reference in uploaded_files to allow re-transcription
+            logging.info(f"Preserved uploaded file reference for task {task_id}")
             
             return JSONResponse(content={"status": "cancelled", "message": "Transcription cancelled successfully"})
         except Exception as e:
@@ -1933,11 +2045,21 @@ async def get_task_status(task_id: str):
 
 @app.get("/transcription/{task_id}")
 async def get_transcription(task_id: str):
-    """Get the transcription text for a completed task"""
+    """Get the transcription text for a completed task, with special handling for cancelled tasks"""
     transcript_file = Path(OUTPUT_DIR) / task_id / "transcript.txt"
+    cancelled_file = Path(OUTPUT_DIR) / task_id / "cancelled.txt"
     
     logging.info(f"Transcription requested for task {task_id}")
     
+    # First check if the task was cancelled
+    if cancelled_file.exists():
+        logging.info(f"Task {task_id} was cancelled, returning appropriate response")
+        return JSONResponse(status_code=202, content={
+            "status": "cancelled",
+            "message": "Transcription was cancelled by the user"
+        })
+    
+    # Then check if the transcript file exists
     if not transcript_file.exists():
         logging.error(f"Transcript file not found for task {task_id}: {transcript_file}")
         
@@ -1993,15 +2115,32 @@ async def get_transcription(task_id: str):
 
 @app.get("/task/{task_id}/status")
 async def get_task_status(task_id: str):
-    """Check if a task has completed in the separate process"""
+    """Check if a task has completed in the separate process, with improved handling for cancelled tasks"""
     task_dir = os.path.join(OUTPUT_DIR, task_id)
     
     # Check if task directory exists
     if not os.path.exists(task_dir):
+        # Even if the directory doesn't exist, the task might still be valid if it's in uploaded_files
+        if task_id in uploaded_files:
+            return JSONResponse(content={
+                "status": "uploaded",
+                "message": "Audio file uploaded but processing not started"
+            })
         return JSONResponse(content={"status": "not_found"})
     
     # Check for cancellation file
     if os.path.exists(os.path.join(task_dir, "cancelled.txt")):
+        # For cancelled tasks, also include the original audio preview URL if available
+        if task_id in uploaded_files:
+            file_ext = os.path.splitext(uploaded_files[task_id])[1]
+            preview_filename = f"{task_id}{file_ext}"
+            preview_url = f"/preview/{preview_filename}"
+            
+            return JSONResponse(content={
+                "status": "cancelled",
+                "message": "Transcription was cancelled",
+                "preview_url": preview_url
+            })
         return JSONResponse(content={
             "status": "cancelled",
             "message": "Transcription was cancelled"
@@ -2059,6 +2198,19 @@ async def get_task_status(task_id: str):
             "progress": 5,
             "message": "Processing in progress...",
             "elapsed_seconds": elapsed_time
+        })
+    
+    # Check for uploaded file status
+    if task_id in uploaded_files:
+        # If we have an uploaded file but no processing info, we're ready to transcribe
+        file_ext = os.path.splitext(uploaded_files[task_id])[1]
+        preview_filename = f"{task_id}{file_ext}"
+        preview_url = f"/preview/{preview_filename}"
+        
+        return JSONResponse(content={
+            "status": "uploaded",
+            "message": "Audio file uploaded but processing not started",
+            "preview_url": preview_url
         })
     
     # Default to in-memory progress
@@ -2313,9 +2465,9 @@ async def download_transcript(file_path: str):
     return FileResponse(path=str(transcript_path), media_type="text/plain", filename=transcript_path.name)
 
 @app.delete("/cleanup/{task_id}")
-async def cleanup(task_id: str):
-    """Clean up all files and directories associated with a task ID,
-    but preserve transcript files for completed tasks unless force=true"""
+async def cleanup(task_id: str, preserve_uploads: bool = False):
+    """Clean up files and directories associated with a task ID,
+    but preserve transcript files for completed tasks and optionally preserve uploads"""
     logging.info(f"Starting cleanup for task {task_id}")
     
     # Check if the task is marked as completed and has a transcript
@@ -2370,36 +2522,38 @@ async def cleanup(task_id: str):
         else:
             logging.info(f"No processed audio folder found for task {task_id}")
         
-        # 2. Remove all temporary upload files for this task
-        temp_files_pattern = f"{task_id}*"  # Match all files starting with the task ID
-        for temp_file in temp_uploads.glob(temp_files_pattern):
-            try:
-                temp_file.unlink()
-                files_removed += 1
-                logging.info(f"Removed temp file: {temp_file}")
-            except Exception as e:
-                logging.error(f"Failed to remove temp file {temp_file}: {e}")
-        
-        if files_removed == 0:
-            logging.info(f"No temp files found for task {task_id}")
+        # 2. Only remove temporary upload files if not preserving uploads
+        if not preserve_uploads:
+            temp_files_pattern = f"{task_id}*"  # Match all files starting with the task ID
+            for temp_file in temp_uploads.glob(temp_files_pattern):
+                try:
+                    temp_file.unlink()
+                    files_removed += 1
+                    logging.info(f"Removed temp file: {temp_file}")
+                except Exception as e:
+                    logging.error(f"Failed to remove temp file {temp_file}: {e}")
+            
+            if files_removed == 0:
+                logging.info(f"No temp files found for task {task_id}")
+            
+            # Remove from uploaded_files dict
+            if task_id in uploaded_files:
+                del uploaded_files[task_id]
+                logging.info(f"Removed task {task_id} from uploaded files")
+        else:
+            logging.info(f"Preserving uploaded files for task {task_id}")
     else:
         logging.info(f"Preserving files for completed task {task_id} with transcript")
     
-    # Always clear memory data 
-    # 3. Clear any entries in the progress store
+    # Always clear memory data for progress
     if task_id in progress_store:
         del progress_store[task_id]
         logging.info(f"Cleared progress data for task {task_id}")
     
-    # 4. Clear any entries in the result store only if not completed with transcript
+    # Only clear result store if not completed with transcript
     if task_id in result_store and not is_completed_with_transcript:
         del result_store[task_id]
         logging.info(f"Cleared result data for task {task_id}")
-    
-    # 5. Remove task from uploaded_files if present and not completed with transcript
-    if task_id in uploaded_files and not is_completed_with_transcript:
-        del uploaded_files[task_id]
-        logging.info(f"Removed task {task_id} from uploaded files")
     
     return JSONResponse(content={
         "status": "success",
@@ -2407,7 +2561,8 @@ async def cleanup(task_id: str):
         "details": {
             "files_removed": files_removed,
             "directories_removed": dirs_removed,
-            "preserved_transcript": is_completed_with_transcript
+            "preserved_transcript": is_completed_with_transcript,
+            "preserved_uploads": preserve_uploads
         }
     })
 
@@ -2460,11 +2615,12 @@ async def manual_cleanup(hours: int = 1):
     
 @app.post("/cleanup/{task_id}")
 async def cleanup_on_refresh(task_id: str):
-    """Handle cleanup requests from navigator.sendBeacon (used on page refresh/close)"""
+    """Handle cleanup requests from navigator.sendBeacon (used on page refresh/close).
+    This version preserves uploaded files."""
     logging.info(f"Received cleanup request via POST for task {task_id} (likely page refresh)")
     
-    # Use the same cleanup logic as the DELETE endpoint
-    response = await cleanup(task_id)
+    # Use the same cleanup logic as the DELETE endpoint, but with preserve_uploads=True
+    response = await cleanup(task_id, preserve_uploads=True)  # Changed from False to True
     
     return response
 
