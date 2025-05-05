@@ -19,6 +19,7 @@ back/.env.production
 back/.env.local
 back/.env.*.local
 back/test_samples
+back/data/
 
 # Frontend specific
 front/.env
@@ -161,3 +162,5 @@ docker-compose.override.yml
 *.swp
 *.swo
 *~
+back/eval-asr.py
+back/eval-speechseparation.py
