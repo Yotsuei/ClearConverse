@@ -21,6 +21,19 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
 
   const API_BASE_URL = config.api.baseUrl;
 
+  // Extract task ID from downloadUrl
+  // Format is typically "/download/{task_id}/transcript.txt"
+  const extractTaskId = (url: string): string => {
+    const parts = url.split('/');
+    // The task ID should be the part after "/download/" and before "/transcript.txt"
+    if (parts.length >= 3 && parts[1] === "download") {
+      return parts[2];
+    }
+    return "";
+  };
+
+  const taskId = extractTaskId(downloadUrl);
+
   // Format transcript with speaker highlighting
   const formatTranscript = (text: string) => {
     const hasSpeakerTags = /\[SPEAKER_[A-Z]\]/g.test(text);
@@ -199,14 +212,14 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({
       {/* Action buttons */}
       <div className="mt-6 flex flex-wrap gap-3">
         <a
-          href={`${API_BASE_URL}${downloadUrl}`}
-          download="transcript.txt"
+          href={`${API_BASE_URL}/download-pdf/${taskId}`}
+          download="transcript.pdf"
           className="flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors shadow-sm"
         >
           <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
           </svg>
-          Download Transcript
+          Download as PDF
         </a>
         
         {/* Clear button (keeps audio) */}

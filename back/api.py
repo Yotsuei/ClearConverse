@@ -49,6 +49,14 @@ import re
 
 import warnings
 
+# PDF generation libraries
+from reportlab.lib.pagesizes import letter
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+from reportlab.lib.units import inch
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+
 # Filter specific warnings
 warnings.filterwarnings("ignore", message=".*Failed to launch Triton kernels.*")
 warnings.filterwarnings("ignore", message=".*TensorFloat-32.*")
@@ -125,6 +133,107 @@ class Config:
     sliding_window_size: float = 0.80  
     sliding_window_step: float = 0.40  
     secondary_diarization_threshold: float = 0.30
+
+# =============================================================================
+# PDF Generation Functions
+# =============================================================================
+
+def generate_transcript_pdf(transcript_text, output_path):
+    """Generate a PDF from transcript text with script-like formatting."""
+    # Create a PDF document
+    doc = SimpleDocTemplate(output_path, pagesize=letter)
+    styles = getSampleStyleSheet()
+    
+    # Create custom styles for different parts of the script
+    title_style = ParagraphStyle(
+        'Title',
+        parent=styles['Heading1'],
+        fontSize=18,
+        alignment=TA_LEFT,
+        spaceAfter=24
+    )
+    
+    speaker_style = ParagraphStyle(
+        'Speaker',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=12,
+        leftIndent=0,
+        spaceAfter=6
+    )
+    
+    dialogue_style = ParagraphStyle(
+        'Dialogue',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=11,
+        leftIndent=20,
+        spaceAfter=12,
+        leading=14
+    )
+    
+    timestamp_style = ParagraphStyle(
+        'Timestamp',
+        parent=styles['Italic'],
+        fontName='Helvetica-Oblique',
+        fontSize=9,
+        textColor=colors.gray,
+        leftIndent=20,
+        spaceAfter=2
+    )
+    
+    # Story is the list of flowables that will be added to the document
+    story = []
+    
+    # Add title
+    story.append(Paragraph("Transcript", title_style))
+    story.append(Spacer(1, 12))
+    
+    # Parse transcript text
+    # Split by double newlines which typically separate utterances
+    segments = re.split(r'\n\n|\r\n\r\n', transcript_text)
+    
+    for segment in segments:
+        segment = segment.strip()
+        if not segment:
+            continue
+            
+        # Check if this segment starts with a speaker tag
+        speaker_match = re.match(r'(\[SPEAKER_[A-Z]\])(?:\s+(\d+\.\d+s\s+-\s+\d+\.\d+s))?', segment)
+        
+        if speaker_match:
+            # Extract speaker and timestamp if present
+            speaker_tag = speaker_match.group(1)
+            timestamp = speaker_match.group(2) if speaker_match.group(2) else ""
+            
+            # Get the actual dialogue (everything after the pattern)
+            dialogue_start = speaker_match.end()
+            dialogue = segment[dialogue_start:].strip()
+            
+            # Format speaker tag nicely (SPEAKER_A -> Speaker A)
+            formatted_speaker = speaker_tag.replace('[SPEAKER_', 'Speaker ').replace(']', ':')
+            
+            # Add to story
+            story.append(Paragraph(formatted_speaker, speaker_style))
+            if timestamp:
+                story.append(Paragraph(f"({timestamp})", timestamp_style))
+            
+            # Handle multi-line dialogue
+            for line in dialogue.split('\n'):
+                if line.strip():
+                    story.append(Paragraph(line.strip(), dialogue_style))
+            
+            story.append(Spacer(1, 6))
+        else:
+            # If no speaker tag, just add as normal paragraph
+            for line in segment.split('\n'):
+                if line.strip():
+                    story.append(Paragraph(line.strip(), dialogue_style))
+            story.append(Spacer(1, 6))
+    
+    # Build PDF
+    doc.build(story)
+    return output_path
 
 # =============================================================================
 # Utility Functions 
@@ -2042,6 +2151,34 @@ async def get_task_status(task_id: str):
     
     # Default response if nothing else applies
     return JSONResponse(content={"status": "unknown", "progress": 0, "message": "Unknown status"})
+
+@app.get("/download-pdf/{task_id}")
+async def download_pdf_transcript(task_id: str):
+    """Generate and download the transcript as a PDF file"""
+    transcript_path = Path(OUTPUT_DIR) / task_id / "transcript.txt"
+    if not transcript_path.exists():
+        raise HTTPException(status_code=404, detail="Transcript file not found.")
+        
+    try:
+        # Read the text transcript
+        with open(transcript_path, "r", encoding="utf-8") as f:
+            transcript_text = f.read()
+            
+        # Define the PDF output path
+        pdf_path = Path(OUTPUT_DIR) / task_id / "transcript.pdf"
+        
+        # Generate the PDF
+        generate_transcript_pdf(transcript_text, str(pdf_path))
+        
+        # Serve the PDF file
+        return FileResponse(
+            path=str(pdf_path), 
+            media_type="application/pdf",
+            filename="transcript.pdf"
+        )
+    except Exception as e:
+        logging.error(f"Error generating PDF for task {task_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate PDF: {str(e)}")
 
 @app.get("/transcription/{task_id}")
 async def get_transcription(task_id: str):
