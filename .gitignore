@@ -18,6 +18,7 @@ back/.env.test
 back/.env.production
 back/.env.local
 back/.env.*.local
+back/test_samples
 
 # Frontend specific
 front/.env
