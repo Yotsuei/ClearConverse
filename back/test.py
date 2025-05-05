@@ -1536,7 +1536,7 @@ if __name__ == "__main__":
             })
     
     # Add speaker_embedding_threshold variations
-    for value in [0.30, 0.40, 0.50]:
+    for value in [0.40, 0.50, 0.80]:
         if value != base_config["speaker_embedding_threshold"]:
             configurations.append({
                 **base_config,
@@ -1568,7 +1568,7 @@ if __name__ == "__main__":
             })
     
     # Add secondary_diarization_threshold variations
-    for value in [0.20, 0.30, 0.40]:
+    for value in [0.30, 0.40, 0.70]:
         if value != base_config["secondary_diarization_threshold"]:
             configurations.append({
                 **base_config,

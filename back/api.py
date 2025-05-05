@@ -109,7 +109,7 @@ class Config:
     overlap_threshold: float = 0.50  
     condition_on_previous_text: bool = True
     merge_gap_threshold: float = 0.50
-    min_overlap_duration_for_separation: float = 0.60  
+    min_overlap_duration_for_separation: float = 0.50  
     max_embedding_segments: int = 100  
     enhance_separated_audio: bool = True
     use_vad_refinement: bool = True
