@@ -1,7 +1,3 @@
-#!/usr/bin/env python3
-# diarization_threshold_tester.py
-# A standalone script for testing speaker diarization threshold effectiveness
-
 # System imports
 import os
 import json
