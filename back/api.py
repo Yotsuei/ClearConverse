@@ -145,10 +145,19 @@ def generate_transcript_pdf(transcript_text, output_path, original_filename=None
     styles = getSampleStyleSheet()
     
     # Create custom styles for different parts of the script
+    header_style = ParagraphStyle(
+        'Header',
+        parent=styles['Heading1'],
+        fontSize=14,
+        alignment=TA_CENTER,
+        spaceAfter=6,
+        textColor=colors.darkblue
+    )
+    
     title_style = ParagraphStyle(
         'Title',
         parent=styles['Heading1'],
-        fontSize=18,
+        fontSize=16,
         alignment=TA_LEFT,
         spaceAfter=12
     )
@@ -201,6 +210,10 @@ def generate_transcript_pdf(transcript_text, output_path, original_filename=None
     
     # Create the story elements
     story = []
+    
+    # Add ClearConverse header
+    story.append(Paragraph("ClearConverse : Overlapping Speech Transcription", header_style))
+    story.append(Spacer(1, 12))
     
     # Add title with original filename if available
     if original_filename:
@@ -256,16 +269,17 @@ def generate_transcript_pdf(transcript_text, output_path, original_filename=None
                     story.append(Paragraph(line.strip(), dialogue_style))
             story.append(Spacer(1, 6))
     
-    # Create the page template with footer
+    # Create the page template with footer including page numbers
     def add_footer(canvas, doc):
         canvas.saveState()
-        footer_text = f"Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        generation_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        footer_text = f"Generated on {generation_time} | Page {doc.page} of {doc.pageCount}"
         p = Paragraph(footer_text, footer_style)
         w, h = p.wrap(doc.width, doc.bottomMargin)
         p.drawOn(canvas, doc.leftMargin, 0.5 * inch)
         canvas.restoreState()
     
-    # Build PDF with footer template
+    # Build PDF with footer template that includes page numbers
     doc.build(story, onFirstPage=add_footer, onLaterPages=add_footer)
     return output_path
 
