@@ -140,8 +140,31 @@ class Config:
 
 def generate_transcript_pdf(transcript_text, output_path):
     """Generate a PDF from transcript text with script-like formatting."""
-    # Create a PDF document
-    doc = SimpleDocTemplate(output_path, pagesize=letter)
+    
+    # Create a function to add page decorations (header and footer)
+    def add_page_decorations(canvas, doc):
+        canvas.saveState()
+        
+        # Add header
+        canvas.setFont('Helvetica-Bold', 14)
+        header_text = "ClearConverse : Overlapping Speech Transcription"
+        canvas.drawCentredString(letter[0]/2, letter[1] - 30, header_text)
+        canvas.line(doc.leftMargin, letter[1] - 45, letter[0] - doc.leftMargin, letter[1] - 45)
+        
+        # Add footer with page number
+        canvas.setFont('Helvetica', 10)
+        page_num = f"Page {doc.page}"
+        canvas.drawCentredString(letter[0]/2, 30, page_num)
+        
+        canvas.restoreState()
+    
+    # Create a PDF document with adjusted margins
+    doc = SimpleDocTemplate(
+        output_path, 
+        pagesize=letter,
+        topMargin=60,  # Increased to make room for header
+        bottomMargin=45  # Increased to make room for footer
+    )
     styles = getSampleStyleSheet()
     
     # Create custom styles for different parts of the script
@@ -231,8 +254,9 @@ def generate_transcript_pdf(transcript_text, output_path):
                     story.append(Paragraph(line.strip(), dialogue_style))
             story.append(Spacer(1, 6))
     
-    # Build PDF
-    doc.build(story)
+    # Build PDF with header and footer
+    doc.build(story, onFirstPage=add_page_decorations, onLaterPages=add_page_decorations)
+    
     return output_path
 
 # =============================================================================
