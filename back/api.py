@@ -138,9 +138,9 @@ class Config:
 # PDF Generation Functions
 # =============================================================================
 
-def generate_transcript_pdf(transcript_text, output_path):
-    """Generate a PDF from transcript text with script-like formatting."""
-    # Create a PDF document
+def generate_transcript_pdf(transcript_text, output_path, original_filename=None):
+    """Generate a PDF from transcript text with script-like formatting, including filename and timestamp."""
+    # Create a PDF document with page templates for headers/footers
     doc = SimpleDocTemplate(output_path, pagesize=letter)
     styles = getSampleStyleSheet()
     
@@ -150,7 +150,16 @@ def generate_transcript_pdf(transcript_text, output_path):
         parent=styles['Heading1'],
         fontSize=18,
         alignment=TA_LEFT,
-        spaceAfter=24
+        spaceAfter=12
+    )
+    
+    subtitle_style = ParagraphStyle(
+        'Subtitle',
+        parent=styles['Italic'],
+        fontSize=12,
+        alignment=TA_LEFT,
+        spaceAfter=24,
+        textColor=colors.darkgrey
     )
     
     speaker_style = ParagraphStyle(
@@ -182,11 +191,27 @@ def generate_transcript_pdf(transcript_text, output_path):
         spaceAfter=2
     )
     
-    # Story is the list of flowables that will be added to the document
+    footer_style = ParagraphStyle(
+        'Footer',
+        parent=styles['Normal'],
+        fontSize=8,
+        textColor=colors.gray,
+        alignment=TA_RIGHT
+    )
+    
+    # Create the story elements
     story = []
     
-    # Add title
-    story.append(Paragraph("Transcript", title_style))
+    # Add title with original filename if available
+    if original_filename:
+        story.append(Paragraph(f"[{original_filename}] Transcript", title_style))
+    else:
+        story.append(Paragraph("Transcript", title_style))
+    
+    # Add generation timestamp in subtitle
+    generation_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    story.append(Paragraph(f"Generated on {generation_time}", subtitle_style))
+    
     story.append(Spacer(1, 12))
     
     # Parse transcript text
@@ -231,8 +256,17 @@ def generate_transcript_pdf(transcript_text, output_path):
                     story.append(Paragraph(line.strip(), dialogue_style))
             story.append(Spacer(1, 6))
     
-    # Build PDF
-    doc.build(story)
+    # Create the page template with footer
+    def add_footer(canvas, doc):
+        canvas.saveState()
+        footer_text = f"Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        p = Paragraph(footer_text, footer_style)
+        w, h = p.wrap(doc.width, doc.bottomMargin)
+        p.drawOn(canvas, doc.leftMargin, 0.5 * inch)
+        canvas.restoreState()
+    
+    # Build PDF with footer template
+    doc.build(story, onFirstPage=add_footer, onLaterPages=add_footer)
     return output_path
 
 # =============================================================================
@@ -523,6 +557,7 @@ def ensure_wav_format(file_path: str) -> str:
 uploaded_files = {}
 progress_store = {}
 result_store = {}
+original_filenames = {}
 
 # =============================================================================
 # Enhanced Audio Processor Class
@@ -1707,7 +1742,6 @@ def run_transcription_process(task_id, file_path, output_dir):
 # Add this constant at the top of the file, after the imports
 MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024  # 25MB
 
-# Modify the upload-file endpoint to include file size validation
 @app.post("/upload-file")
 async def upload_file(file: UploadFile = File(...)):
     """Endpoint to upload an audio file for processing"""
@@ -1730,6 +1764,9 @@ async def upload_file(file: UploadFile = File(...)):
     extension = os.path.splitext(file.filename)[1]
     filename = f"{task_id}{extension}"
     file_path = temp_uploads / filename
+    
+    # Store original filename mapped to task_id
+    original_filenames[task_id] = file.filename
     
     with open(file_path, "wb") as f:
         f.write(content)  # Use the content we already read
@@ -1763,6 +1800,14 @@ async def upload_url(url: str = Form(...)):
         
     filename = f"{task_id}{extension}"
     file_path = temp_uploads / filename
+    
+    # Extract original filename from URL or use a default name
+    original_filename = os.path.basename(parsed_url.path)
+    if not original_filename or original_filename == '':
+        original_filename = f"recording{extension}"
+    
+    # Store original filename or a derived name from URL
+    original_filenames[task_id] = original_filename
     
     # Update progress to indicate download starting
     update_progress(task_id, 5, "Starting download from URL")
@@ -2167,8 +2212,11 @@ async def download_pdf_transcript(task_id: str):
         # Define the PDF output path
         pdf_path = Path(OUTPUT_DIR) / task_id / "transcript.pdf"
         
-        # Generate the PDF
-        generate_transcript_pdf(transcript_text, str(pdf_path))
+        # Get original filename if available
+        original_filename = original_filenames.get(task_id, None)
+        
+        # Generate the PDF with filename
+        generate_transcript_pdf(transcript_text, str(pdf_path), original_filename)
         
         # Serve the PDF file
         return FileResponse(
@@ -2682,10 +2730,15 @@ async def cleanup(task_id: str, preserve_uploads: bool = False):
     else:
         logging.info(f"Preserving files for completed task {task_id} with transcript")
     
-    # Always clear memory data for progress
+   # Always clear memory data for progress
     if task_id in progress_store:
         del progress_store[task_id]
         logging.info(f"Cleared progress data for task {task_id}")
+    
+    # Clear original filename data
+    if task_id in original_filenames:
+        del original_filenames[task_id]
+        logging.info(f"Cleared original filename data for task {task_id}")
     
     # Only clear result store if not completed with transcript
     if task_id in result_store and not is_completed_with_transcript:
