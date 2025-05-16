@@ -2793,7 +2793,6 @@ def setup_torch_optimizations():
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
     
-    # You could add other optimizations here in the future
     logging.info("PyTorch optimizations enabled")
 
 if __name__ == "__main__":
