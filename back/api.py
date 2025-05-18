@@ -138,48 +138,44 @@ class Config:
 # PDF Generation Functions
 # =============================================================================
 
-def generate_transcript_pdf(transcript_text, output_path):
-    """Generate a PDF from transcript text with script-like formatting."""
-    
-    # Create a function to add page decorations (header and footer)
-    def add_page_decorations(canvas, doc):
-        canvas.saveState()
-        
-        # Add header
-        canvas.setFont('Helvetica-Bold', 14)
-        header_text = "ClearConverse : Overlapping Speech Transcription"
-        canvas.drawCentredString(letter[0]/2, letter[1] - 30, header_text)
-        canvas.line(doc.leftMargin, letter[1] - 45, letter[0] - doc.leftMargin, letter[1] - 45)
-        
-        # Add footer with page number
-        canvas.setFont('Helvetica', 10)
-        page_num = f"Page {doc.page}"
-        canvas.drawCentredString(letter[0]/2, 30, page_num)
-        
-        canvas.restoreState()
-    
-    # Create a PDF document with adjusted margins
-    doc = SimpleDocTemplate(
-        output_path, 
-        pagesize=letter,
-        topMargin=60,  # Increased to make room for header
-        bottomMargin=45  # Increased to make room for footer
-    )
+def generate_transcript_pdf(transcript_text, output_path, original_filename=None):
+    """Generate a PDF from transcript text with script-like formatting, including filename and timestamp."""
+    # Create a PDF document with page templates for headers/footers
+    doc = SimpleDocTemplate(output_path, pagesize=letter)
     styles = getSampleStyleSheet()
     
     # Create custom styles for different parts of the script
+    header_style = ParagraphStyle(
+        'Header',
+        parent=styles['Heading1'],
+        fontSize=14,
+        alignment=TA_CENTER,
+        spaceAfter=6,
+    )
+    
     title_style = ParagraphStyle(
         'Title',
         parent=styles['Heading1'],
-        fontSize=18,
+        fontSize=16,
         alignment=TA_LEFT,
-        spaceAfter=24
+        spaceAfter=12,
+        fontName='Courier-Bold'  # Typewriter-like font
+    )
+    
+    subtitle_style = ParagraphStyle(
+        'Subtitle',
+        parent=styles['Italic'],
+        fontSize=12,
+        alignment=TA_LEFT,
+        spaceAfter=24,
+        textColor=colors.darkgrey,
+        fontName='Courier-Oblique'  # Typewriter-like font
     )
     
     speaker_style = ParagraphStyle(
         'Speaker',
         parent=styles['Normal'],
-        fontName='Helvetica-Bold',
+        fontName='Courier-Bold',  # Typewriter-like font
         fontSize=12,
         leftIndent=0,
         spaceAfter=6
@@ -188,7 +184,7 @@ def generate_transcript_pdf(transcript_text, output_path):
     dialogue_style = ParagraphStyle(
         'Dialogue',
         parent=styles['Normal'],
-        fontName='Helvetica',
+        fontName='Courier',  # Typewriter-like font
         fontSize=11,
         leftIndent=20,
         spaceAfter=12,
@@ -198,18 +194,41 @@ def generate_transcript_pdf(transcript_text, output_path):
     timestamp_style = ParagraphStyle(
         'Timestamp',
         parent=styles['Italic'],
-        fontName='Helvetica-Oblique',
+        fontName='Courier-Oblique',  # Typewriter-like font
         fontSize=9,
         textColor=colors.gray,
         leftIndent=20,
         spaceAfter=2
     )
     
-    # Story is the list of flowables that will be added to the document
+    footer_style = ParagraphStyle(
+        'Footer',
+        parent=styles['Normal'],
+        fontSize=8,
+        textColor=colors.gray,
+        alignment=TA_RIGHT,
+        fontName='Courier'  # Typewriter-like font
+    )
+    
+    # Create the story elements
     story = []
     
-    # Add title
-    story.append(Paragraph("Transcript", title_style))
+    # Add ClearConverse header with mixed colors
+    # Using HTML-like formatting to apply different colors
+    colored_header = '<para alignment="center"><font color="#1E90FF">Clear</font><font color="#444444">Converse</font> : Overlapping Speech Transcription</para>'
+    story.append(Paragraph(colored_header, header_style))
+    story.append(Spacer(1, 12))
+    
+    # Add title with original filename if available
+    if original_filename:
+        story.append(Paragraph(f"[{original_filename}] Transcript", title_style))
+    else:
+        story.append(Paragraph("Transcript", title_style))
+    
+    # Add generation timestamp in subtitle
+    generation_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    story.append(Paragraph(f"Generated on {generation_time}", subtitle_style))
+    
     story.append(Spacer(1, 12))
     
     # Parse transcript text
@@ -254,9 +273,18 @@ def generate_transcript_pdf(transcript_text, output_path):
                     story.append(Paragraph(line.strip(), dialogue_style))
             story.append(Spacer(1, 6))
     
-    # Build PDF with header and footer
-    doc.build(story, onFirstPage=add_page_decorations, onLaterPages=add_page_decorations)
+    # Create the page template with footer including page numbers
+    def add_footer(canvas, doc):
+        canvas.saveState()
+        generation_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        footer_text = f"Generated on {generation_time} | Page {doc.page}"
+        p = Paragraph(footer_text, footer_style)
+        w, h = p.wrap(doc.width, doc.bottomMargin)
+        p.drawOn(canvas, doc.leftMargin, 0.5 * inch)
+        canvas.restoreState()
     
+    # Build PDF with footer template that includes page numbers
+    doc.build(story, onFirstPage=add_footer, onLaterPages=add_footer)
     return output_path
 
 # =============================================================================
@@ -547,6 +575,7 @@ def ensure_wav_format(file_path: str) -> str:
 uploaded_files = {}
 progress_store = {}
 result_store = {}
+original_filenames = {}
 
 # =============================================================================
 # Enhanced Audio Processor Class
@@ -1731,7 +1760,6 @@ def run_transcription_process(task_id, file_path, output_dir):
 # Add this constant at the top of the file, after the imports
 MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024  # 25MB
 
-# Modify the upload-file endpoint to include file size validation
 @app.post("/upload-file")
 async def upload_file(file: UploadFile = File(...)):
     """Endpoint to upload an audio file for processing"""
@@ -1754,6 +1782,9 @@ async def upload_file(file: UploadFile = File(...)):
     extension = os.path.splitext(file.filename)[1]
     filename = f"{task_id}{extension}"
     file_path = temp_uploads / filename
+    
+    # Store original filename mapped to task_id
+    original_filenames[task_id] = file.filename
     
     with open(file_path, "wb") as f:
         f.write(content)  # Use the content we already read
@@ -1787,6 +1818,14 @@ async def upload_url(url: str = Form(...)):
         
     filename = f"{task_id}{extension}"
     file_path = temp_uploads / filename
+    
+    # Extract original filename from URL or use a default name
+    original_filename = os.path.basename(parsed_url.path)
+    if not original_filename or original_filename == '':
+        original_filename = f"recording{extension}"
+    
+    # Store original filename or a derived name from URL
+    original_filenames[task_id] = original_filename
     
     # Update progress to indicate download starting
     update_progress(task_id, 5, "Starting download from URL")
@@ -2191,14 +2230,25 @@ async def download_pdf_transcript(task_id: str):
         # Define the PDF output path
         pdf_path = Path(OUTPUT_DIR) / task_id / "transcript.pdf"
         
-        # Generate the PDF
-        generate_transcript_pdf(transcript_text, str(pdf_path))
+        # Get original filename if available
+        original_filename = original_filenames.get(task_id, None)
         
-        # Serve the PDF file
+        # Generate the PDF with filename
+        generate_transcript_pdf(transcript_text, str(pdf_path), original_filename)
+        
+        # Create a custom filename for download
+        if original_filename:
+            # Remove file extension from original filename
+            base_name = os.path.splitext(original_filename)[0]
+            download_filename = f"{base_name}-Transcript.pdf"
+        else:
+            download_filename = "transcript.pdf"
+        
+        # Serve the PDF file with the custom filename
         return FileResponse(
             path=str(pdf_path), 
             media_type="application/pdf",
-            filename="transcript.pdf"
+            filename=download_filename
         )
     except Exception as e:
         logging.error(f"Error generating PDF for task {task_id}: {e}")
@@ -2399,66 +2449,6 @@ async def clean_up_task_files(task_id: str):
         logging.info(f"Created cancellation marker for task {task_id}")
     except Exception as e:
         logging.error(f"Error in clean_up_task_files for {task_id}: {e}")
-
-@app.get("/transcription/{task_id}")
-async def get_transcription(task_id: str):
-    """Get the transcription text for a completed task"""
-    transcript_file = Path(OUTPUT_DIR) / task_id / "transcript.txt"
-    
-    logging.info(f"Transcription requested for task {task_id}")
-    
-    if not transcript_file.exists():
-        logging.error(f"Transcript file not found for task {task_id}: {transcript_file}")
-        
-        # Check if the task was processed but the file might have been cleaned up
-        if task_id in result_store:
-            # If we have a result but no file, try to provide a helpful error
-            logging.error(f"Task {task_id} is in result_store but file not found")
-            return JSONResponse(status_code=404, content={
-                "error": "Transcript file not found",
-                "detail": "The transcript file may have been deleted or the task was cancelled"
-            })
-        else:
-            # General case when no data exists for this task
-            logging.error(f"Task {task_id} not found in result_store")
-            return JSONResponse(status_code=404, content={
-                "error": "Transcription not found",
-                "detail": "No transcription data found for this task ID"
-            })
-    
-    # File exists, check if it has content
-    file_size = transcript_file.stat().st_size
-    logging.info(f"Found transcript file for task {task_id}, size: {file_size} bytes")
-    
-    if file_size == 0:
-        logging.error(f"Transcript file for task {task_id} is empty")
-        return JSONResponse(status_code=400, content={
-            "error": "Empty transcript file",
-            "detail": "The transcript file exists but contains no data"
-        })
-    
-    try:
-        with open(transcript_file, "r", encoding="utf-8") as f:
-            transcript = f.read()
-        
-        if not transcript.strip():
-            logging.error(f"Transcript file for task {task_id} contains only whitespace")
-            return JSONResponse(status_code=400, content={
-                "error": "Empty transcript content",
-                "detail": "The transcript file contains only whitespace"
-            })
-        
-        # Log a preview of the transcript
-        preview = transcript[:100] + "..." if len(transcript) > 100 else transcript
-        logging.info(f"Returning transcript for task {task_id}: {preview}")
-        
-        return JSONResponse(content={"task_id": task_id, "transcription": transcript})
-    except Exception as e:
-        logging.error(f"Error reading transcript file {transcript_file}: {e}")
-        return JSONResponse(status_code=500, content={
-            "error": "Failed to read transcript",
-            "detail": str(e)
-        })
 
 @app.get("/task/{task_id}/result")
 async def get_task_result(task_id: str):
@@ -2706,10 +2696,15 @@ async def cleanup(task_id: str, preserve_uploads: bool = False):
     else:
         logging.info(f"Preserving files for completed task {task_id} with transcript")
     
-    # Always clear memory data for progress
+   # Always clear memory data for progress
     if task_id in progress_store:
         del progress_store[task_id]
         logging.info(f"Cleared progress data for task {task_id}")
+    
+    # Clear original filename data
+    if task_id in original_filenames:
+        del original_filenames[task_id]
+        logging.info(f"Cleared original filename data for task {task_id}")
     
     # Only clear result store if not completed with transcript
     if task_id in result_store and not is_completed_with_transcript:
