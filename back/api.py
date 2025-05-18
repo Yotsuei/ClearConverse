@@ -151,7 +151,6 @@ def generate_transcript_pdf(transcript_text, output_path, original_filename=None
         fontSize=14,
         alignment=TA_CENTER,
         spaceAfter=6,
-        textColor=colors.darkblue
     )
     
     title_style = ParagraphStyle(
@@ -159,7 +158,8 @@ def generate_transcript_pdf(transcript_text, output_path, original_filename=None
         parent=styles['Heading1'],
         fontSize=16,
         alignment=TA_LEFT,
-        spaceAfter=12
+        spaceAfter=12,
+        fontName='Courier-Bold'  # Typewriter-like font
     )
     
     subtitle_style = ParagraphStyle(
@@ -168,13 +168,14 @@ def generate_transcript_pdf(transcript_text, output_path, original_filename=None
         fontSize=12,
         alignment=TA_LEFT,
         spaceAfter=24,
-        textColor=colors.darkgrey
+        textColor=colors.darkgrey,
+        fontName='Courier-Oblique'  # Typewriter-like font
     )
     
     speaker_style = ParagraphStyle(
         'Speaker',
         parent=styles['Normal'],
-        fontName='Helvetica-Bold',
+        fontName='Courier-Bold',  # Typewriter-like font
         fontSize=12,
         leftIndent=0,
         spaceAfter=6
@@ -183,7 +184,7 @@ def generate_transcript_pdf(transcript_text, output_path, original_filename=None
     dialogue_style = ParagraphStyle(
         'Dialogue',
         parent=styles['Normal'],
-        fontName='Helvetica',
+        fontName='Courier',  # Typewriter-like font
         fontSize=11,
         leftIndent=20,
         spaceAfter=12,
@@ -193,7 +194,7 @@ def generate_transcript_pdf(transcript_text, output_path, original_filename=None
     timestamp_style = ParagraphStyle(
         'Timestamp',
         parent=styles['Italic'],
-        fontName='Helvetica-Oblique',
+        fontName='Courier-Oblique',  # Typewriter-like font
         fontSize=9,
         textColor=colors.gray,
         leftIndent=20,
@@ -205,14 +206,17 @@ def generate_transcript_pdf(transcript_text, output_path, original_filename=None
         parent=styles['Normal'],
         fontSize=8,
         textColor=colors.gray,
-        alignment=TA_RIGHT
+        alignment=TA_RIGHT,
+        fontName='Courier'  # Typewriter-like font
     )
     
     # Create the story elements
     story = []
     
-    # Add ClearConverse header
-    story.append(Paragraph("ClearConverse : Overlapping Speech Transcription", header_style))
+    # Add ClearConverse header with mixed colors
+    # Using HTML-like formatting to apply different colors
+    colored_header = '<para alignment="center"><font color="#1E90FF">Clear</font><font color="#444444">Converse</font> : Overlapping Speech Transcription</para>'
+    story.append(Paragraph(colored_header, header_style))
     story.append(Spacer(1, 12))
     
     # Add title with original filename if available
@@ -273,7 +277,7 @@ def generate_transcript_pdf(transcript_text, output_path, original_filename=None
     def add_footer(canvas, doc):
         canvas.saveState()
         generation_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        footer_text = f"Generated on {generation_time} | Page {doc.page} of {doc.pageCount}"
+        footer_text = f"Generated on {generation_time} | Page {doc.page}"
         p = Paragraph(footer_text, footer_style)
         w, h = p.wrap(doc.width, doc.bottomMargin)
         p.drawOn(canvas, doc.leftMargin, 0.5 * inch)
@@ -2232,11 +2236,19 @@ async def download_pdf_transcript(task_id: str):
         # Generate the PDF with filename
         generate_transcript_pdf(transcript_text, str(pdf_path), original_filename)
         
-        # Serve the PDF file
+        # Create a custom filename for download
+        if original_filename:
+            # Remove file extension from original filename
+            base_name = os.path.splitext(original_filename)[0]
+            download_filename = f"{base_name}-Transcript.pdf"
+        else:
+            download_filename = "transcript.pdf"
+        
+        # Serve the PDF file with the custom filename
         return FileResponse(
             path=str(pdf_path), 
             media_type="application/pdf",
-            filename="transcript.pdf"
+            filename=download_filename
         )
     except Exception as e:
         logging.error(f"Error generating PDF for task {task_id}: {e}")
@@ -2437,66 +2449,6 @@ async def clean_up_task_files(task_id: str):
         logging.info(f"Created cancellation marker for task {task_id}")
     except Exception as e:
         logging.error(f"Error in clean_up_task_files for {task_id}: {e}")
-
-@app.get("/transcription/{task_id}")
-async def get_transcription(task_id: str):
-    """Get the transcription text for a completed task"""
-    transcript_file = Path(OUTPUT_DIR) / task_id / "transcript.txt"
-    
-    logging.info(f"Transcription requested for task {task_id}")
-    
-    if not transcript_file.exists():
-        logging.error(f"Transcript file not found for task {task_id}: {transcript_file}")
-        
-        # Check if the task was processed but the file might have been cleaned up
-        if task_id in result_store:
-            # If we have a result but no file, try to provide a helpful error
-            logging.error(f"Task {task_id} is in result_store but file not found")
-            return JSONResponse(status_code=404, content={
-                "error": "Transcript file not found",
-                "detail": "The transcript file may have been deleted or the task was cancelled"
-            })
-        else:
-            # General case when no data exists for this task
-            logging.error(f"Task {task_id} not found in result_store")
-            return JSONResponse(status_code=404, content={
-                "error": "Transcription not found",
-                "detail": "No transcription data found for this task ID"
-            })
-    
-    # File exists, check if it has content
-    file_size = transcript_file.stat().st_size
-    logging.info(f"Found transcript file for task {task_id}, size: {file_size} bytes")
-    
-    if file_size == 0:
-        logging.error(f"Transcript file for task {task_id} is empty")
-        return JSONResponse(status_code=400, content={
-            "error": "Empty transcript file",
-            "detail": "The transcript file exists but contains no data"
-        })
-    
-    try:
-        with open(transcript_file, "r", encoding="utf-8") as f:
-            transcript = f.read()
-        
-        if not transcript.strip():
-            logging.error(f"Transcript file for task {task_id} contains only whitespace")
-            return JSONResponse(status_code=400, content={
-                "error": "Empty transcript content",
-                "detail": "The transcript file contains only whitespace"
-            })
-        
-        # Log a preview of the transcript
-        preview = transcript[:100] + "..." if len(transcript) > 100 else transcript
-        logging.info(f"Returning transcript for task {task_id}: {preview}")
-        
-        return JSONResponse(content={"task_id": task_id, "transcription": transcript})
-    except Exception as e:
-        logging.error(f"Error reading transcript file {transcript_file}: {e}")
-        return JSONResponse(status_code=500, content={
-            "error": "Failed to read transcript",
-            "detail": str(e)
-        })
 
 @app.get("/task/{task_id}/result")
 async def get_task_result(task_id: str):
